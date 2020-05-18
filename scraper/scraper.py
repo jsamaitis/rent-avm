@@ -12,13 +12,29 @@ import string
 from fake_useragent import UserAgent
 
 import pandas as pd
-import numpy as np # TODO: Use None instead of np.nan
+
+import logging
+
 
 class Scraper():
-    def __init__(self):
+    def __init__(self, max_retries=3):
         '''
         TODO Descr.
         '''
+
+        self.max_retries = max_retries
+
+
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(asctime)s [%(levelname)s] %(message)s",
+            handlers=[
+                logging.FileHandler("debug.log"),
+                logging.StreamHandler()
+            ]
+        )
+
+        self.session = self.get_tor_session()
         pass
 
     def get_tor_session(self):
@@ -37,7 +53,7 @@ class Scraper():
         # Set additional Tor session parameters.
         session.headers = UserAgent().random
 
-        print('Built a Tor session at IP {}.'.format(session.get('http://httpbin.org/ip').json()['origin']))
+        logging.info('Built a Tor session at IP {}.'.format(session.get('http://httpbin.org/ip').json()['origin']))
         return session
 
 
@@ -49,8 +65,7 @@ class Scraper():
 
         TODO: Descr.
         '''
-        #TODO: Make this relative path, package with scraper.
-        tor_path = 'C:/Users/Jurgis/Desktop/tor-win32-0.4.2.7/Tor/tor.exe'
+        tor_path = os.getcwd() + '/tor-win32-0.4.2.7/Tor/tor.exe'
 
         # Kill existing tor process. TODO: Make this OS-proof.
         os.system("taskkill /F /im tor.exe")
@@ -63,41 +78,71 @@ class Scraper():
         return self.get_tor_session()
 
 
-    def get_number_of_pages(self, session, url):
+    def get_number_of_pages(self, url):
         '''
         TODO: Descr.
-        TODO: Handle SPECIFIC banned / captcha'ed cases with try excepts.
         '''
-        # Set additional Tor session parameters.
-        session.headers = UserAgent().random
 
-        # Scrape the main page to get the total number of pages.
-        page = session.get(url)
-        soup = BeautifulSoup(page.content, 'html.parser')
+        # Error handling with limited retries. Will log error messages and restart the Tor connection, assuming it was
+        # banned. Otherwise will continue.
+        correct_output = False
+        retries = 0
+        while (correct_output) or (retries < self.max_retries):
+            try:
+                # Scrape the main page to get the total number of pages.
+                page = self.session.get(url)
+                soup = BeautifulSoup(page.content, 'html.parser')
 
-        # Extract all page number buttons to find the maximum digit value.
-        page_number_buttons = str(soup.find_all(class_='page-bt'))
-        page_number_buttons = re.findall('\d+', page_number_buttons)
+                # Extract all page number buttons to find the maximum digit value.
+                page_number_buttons = str(soup.find_all(class_='page-bt'))
+                page_number_buttons = re.findall('\d+', page_number_buttons)
 
-        total_pages = max([int(number) for number in page_number_buttons])
+                total_pages = max([int(number) for number in page_number_buttons])
 
-        return total_pages
+                correct_output = True
+                return total_pages
+
+            except Exception as e:
+                logging.warning('Exception occurred at get_number_of_pages:')
+                logging.warning(e)
+
+                retries += 1
+                self.session = self.restart_tor()
+
+        error_message = 'Max retries exceeded with url {}.'.format(url)
+        logging.error(error_message)
+        raise TimeoutError(error_message)
 
 
-    def get_page_urls(self, session, url):
+    def get_page_urls(self, url):
         '''
         TODO: Descr.
-        TODO: Return SPECIFIC exceptions by restarting a tor session and re-running.
         '''
-        # Get page contents and put them in a "soup".
-        page = session.get(url)
-        soup = BeautifulSoup(page.content, 'html.parser')
+        correct_output = False
+        retries = 0
+        while (correct_output) or (retries < self.max_retries):
+            try:
+                # Get page contents and put them in a "soup".
+                page = self.session.get(url)
+                soup = BeautifulSoup(page.content, 'html.parser')
 
-        # Extract all listings and get their urls.
-        listings = soup.find_all(class_='list-adress')
-        listings_urls = [listing.find('a', href=True)['href'] for listing in listings]
+                # Extract all listings and get their urls.
+                listings = soup.find_all(class_='list-adress')
+                listings_urls = [listing.find('a', href=True)['href'] for listing in listings]
 
-        return listings_urls
+                correct_output = True
+                return listings_urls
+
+            except Exception as e:
+                logging.warning('Exception occurred at get_page_urls:')
+                logging.warning(e)
+
+                retries += 1
+                self.session = self.restart_tor()
+
+        error_message = 'Max retries exceeded with url {}.'.format(url)
+        logging.error(error_message)
+        raise TimeoutError(error_message)
 
 
     def get_urls(self, url_main='https://www.aruodas.lt/butu-nuoma/', url_listings='https://www.aruodas.lt/butu-nuoma/puslapis/', url_listings_settings='/?FOrder=AddDate&detailed_search=1'):
@@ -107,15 +152,8 @@ class Scraper():
 
         :return:
         '''
-        s = self.get_tor_session()
-        total_pages = self.get_number_of_pages(s, url_main)
 
-        # Restarts session in the case of bans.
-        # TODO: Is there a better way of doing this? Function wrappers based on output?
-        while type(total_pages) != int:
-            print('Restarting TOR')
-            s = self.restart_tor()
-            total_pages = self.get_number_of_pages(s, url_main)
+        total_pages = self.get_number_of_pages(url_main)
 
         # Get listing urls for all of the pages. If an exception occurs while scraping, prints the exception.
         listing_urls = []
@@ -123,25 +161,19 @@ class Scraper():
 
             page_url = url_listings + str(page_number) + url_listings_settings
 
-            page_urls = self.get_page_urls(s, page_url)
-
-            while type(page_urls) != list:
-                print('Restarting TOR')
-                s = self.restart_tor()
-                page_urls = self.get_page_urls(s, page_url)
-
+            page_urls = self.get_page_urls(page_url)
             listing_urls.extend(page_urls)
 
-        # Save urls to a file? TODO: Is this necessary?
-        with open('../data/listing_urls.txt', 'w') as f:
-            f.write('\n'.join(listing_urls))
+
+        return listing_urls
 
 
-    def get_object_data(self, soup, html_tags=None):
+    def parse_object_data(self, soup, html_tags=None):
         '''
         soup - BS4 object.
 
         TODO: Create env variable for html tags or save them to a file somehow. Move to config file.
+        TODO: Separate KEYVARIABLES from OPTIONAL VARIABLES. Wrap ALL optional variables with try except.
         '''
 
         if html_tags is None:
@@ -218,9 +250,13 @@ class Scraper():
             object_data[name] = item
 
         # Get object listing statistics (views, favorites, etc.).
-        listing_statistics = soup.find(class_=html_tag_listing_statistics).contents
-
-        object_data[listing_statistics[0]] = listing_statistics[1].contents[0]
+        try:
+            listing_statistics = soup.find(class_=html_tag_listing_statistics).contents
+            object_data[listing_statistics[0]] = listing_statistics[1].contents[0]
+        except:
+            # TODO: This should ALWAYS have at least some values, but it breaks. Investigate
+            object_data['Skelbimą peržiūrėjo (iš viso/šiandien):'] = '0/0'
+            listing_statistics = None
 
         try:
             object_data['Listing Favorites'] = listing_statistics[3].contents[0]
@@ -240,8 +276,8 @@ class Scraper():
             object_data['Building Energy Class'] = building_energy_class.contents[1]
             object_data['Building Energy Class Category'] = building_energy_class.contents[2]
         except:
-            object_data['Building Energy Class'] = np.nan
-            object_data['Building Energy Class Category'] = np.nan
+            object_data['Building Energy Class'] = None
+            object_data['Building Energy Class Category'] = None
 
         # Check if a realtor is present, get it's name if it is.
         object_contacts = soup.find(class_=html_tag_no_realtor)
@@ -249,25 +285,22 @@ class Scraper():
             realtor_name = soup.find(class_=html_tag_realtor).find(class_=html_tag_realtor_name).contents[0]
             # Handles cases where the realtor is a company, not a person. TODO: Add RealtorCompany variable.
             if realtor_name == 'Pardavėjo kontaktai':
-                object_data['Realtor Name'] = np.nan
+                object_data['Realtor Name'] = None
                 object_data['Realtor'] = False
             else:
                 object_data['Realtor Name'] = realtor_name
                 object_data['Realtor'] = True
         else:
-            object_data['Realtor Name'] = np.nan
+            object_data['Realtor Name'] = None
             object_data['Realtor'] = False
 
         return object_data
 
-    def get_data(self):
+    def get_object_data(self, listing_urls):
         '''
         TODO: Descr.
         :return:
         '''
-
-        with open('../data/listing_urls.txt', 'r') as f:
-            listing_urls = f.readlines()
 
         data = []
 
@@ -286,15 +319,15 @@ class Scraper():
 
             # TODO: Add error handling based on page output.
             try:
-                data.append(self.get_object_data(soup))
+                data.append(self.parse_object_data(soup))
             except:
                 s = self.restart_tor()
-                data.append(self.get_object_data(soup))
+                data.append(self.parse_object_data(soup))
 
         return data
 
 
-    def parse_object_data(self, object_data):
+    def process_object_data(self, object_data):
         '''
         TODO: Descr.
         '''
@@ -326,12 +359,15 @@ class Scraper():
 
         # Transform lists of variables into pseudo categorical variables. E.g. Variable: ['feat1', 'feat2'] -> Variable_feat1: 1, Variable_feat2: 1.
         for variable in variables_lists:
-            # Convert space delimited text to TitleCamelCase. E.g. 'This house' -> 'ThisHouse'.
-            object_data[variable] = [''.join(item.title().split(' ')) for item in object_data[variable]]
+            try:
+                # Convert space delimited text to TitleCamelCase. E.g. 'This house' -> 'ThisHouse'.
+                object_data[variable] = [''.join(item.title().split(' ')) for item in object_data[variable]]
 
-            # Create a pseudo categorical variable where multiple values in a category is present.
-            for feature in object_data[variable]:
-                object_data[variable + '_' + feature] = 1
+                # Create a pseudo categorical variable where multiple values in a category is present.
+                for feature in object_data[variable]:
+                    object_data[variable + '_' + feature] = 1
+            except:
+                continue
 
                 # Split ListingName into City, Neighbourhood, Street.
         object_data['ListingName'] = object_data['ListingName'].split(',')
@@ -357,6 +393,7 @@ class Scraper():
 
         return object_data
 
+
     def scrape(self):
         '''
         TODO: Descr.
@@ -364,14 +401,10 @@ class Scraper():
         :return:
         '''
 
-        self.get_urls()
-        data = self.get_data()
+        listing_urls = self.get_urls()
+        data = self.get_object_data(listing_urls)
+        # Transform list of dicts into a single DataFrame.
+        df = pd.DataFrame(map(pd.Series, map(self.process_object_data, data)))
 
-        # TODO: Do you really need pandas to do this? Optimize for package size / memory?
-        df = pd.DataFrame()
-        for item in data:
-            df = df.append(pd.DataFrame(self.parse_object_data(item), index=[0]))
-
-        df = df.reset_index(drop=True)
 
         return df
