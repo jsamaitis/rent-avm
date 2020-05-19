@@ -1,35 +1,36 @@
 {
-    "html_tags":{
-      "page_number_button": "page-bt",
 
-      "listing_url": "list-adress",
-      "listing_statistics": "obj-top-stats",
-      
-      "building_energy_class": "energy-class-tooltip",
+  "html_tags":{
+    "page_number_button": "page-bt",
 
-      "object_details": ["obj-details", "obj-details "],
-      "object_details_names": "dt",
-      "object_details_items": "dd",
-      "object_details_items_separator": "special-comma",
-      "object_description": "collapsedText",
-      "object_name": "obj-header-text",
+    "listing_url": "list-adress",
+    "listing_statistics": "obj-top-stats",
 
-      "neighbourhood_statistics": "advertStatisticHolder",
-      "neighbourhood_statistics_names": "cell-text",
-      "neighbourhood_statistics_items": "cell-data",
+    "building_energy_class": "energy-class-tooltip",
 
-      "realtor": "obj-contacts",
-      "realtor_name": "contacts-title",
-      "no_realtor": "obj-contacts simple"
-    },
+    "object_details": ["obj-details", "obj-details "],
+    "object_details_names": "dt",
+    "object_details_items": "dd",
+    "object_details_items_separator": "special-comma",
+    "object_description": "collapsedText",
+    "object_name": "obj-header-text",
 
-    "urls":{
-      "main": "https://www.aruodas.lt/butu-nuoma/",
-      "listings": "https://www.aruodas.lt/butu-nuoma/puslapis/",
-      "listings_settings": "/?FOrder=AddDate&detailed_search=1"
-    },
+    "neighbourhood_statistics": "advertStatisticHolder",
+    "neighbourhood_statistics_names": "cell-text",
+    "neighbourhood_statistics_items": "cell-data",
+
+    "realtor_name": "contacts-title",
+    "realtor_organization": "long-link-wrapper"
+  },
+
+  "urls":{
+    "main": "https://www.aruodas.lt/butu-nuoma/",
+    "listings": "https://www.aruodas.lt/butu-nuoma/puslapis/",
+    "listings_settings": "/?FOrder=AddDate&detailed_search=1"
+  },
 
   "file_paths": {
-    "tor": "/tor-win32-0.4.2.7/Tor/tor.exe"
+    "tor": "/tor-win32-0.4.2.7/Tor/tor.exe",
+    "chrome": "/chromedriver.exe"
   }
 }

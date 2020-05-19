@@ -1,7 +1,10 @@
 '''
 Scraper wide further developments:
-    * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use stadard requests for other houses.
-    Selenium is really slow (5-10s / it), but it is nececssary to load neighbourhood statistics from the page using JS.
+    * TODO: Aad progress logs to monitor (e.g. getting urls, getting pages, report every 10 urls, etc.).
+
+    * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use stadard requests for other
+    houses. Selenium is really slow (5-10s / it), but it is nececssary to load neighbourhood statistics from the page
+    using JS.
 
     * TODO: Create a format verifier that reports any new fields as well as fields that were missing when they
     shouldn't, as well as any additional field format checks (ints should be ints, cats should be cats, etc.).
@@ -33,10 +36,10 @@ class Scraper():
         '''
         TODO Descr.
         '''
-
+        # Initialize class variables.
         self.max_retries = max_retries
 
-
+        # Setup Logging.
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(message)s",
@@ -46,12 +49,16 @@ class Scraper():
             ]
         )
 
-        # Load config file.
+        # Load the config files.
         with open("config_scraper.json") as f:
             self.config = json.load(f)
 
+        with open('dead_urls.cfg', 'r') as f:
+            self.dead_urls = [line.strip() for line in f.readlines()]
+
         # Start Tor and get the session.
         self.session = self.restart_tor()
+
         pass
 
     def get_tor_session(self):
@@ -78,13 +85,13 @@ class Scraper():
         '''
         A forceful hack since tor doesn't function as intended on my windows and none of the solution work. Too bad! https://www.youtube.com/watch?v=k238XpMMn38
 
-        Commented out code is how it should work.
 
         TODO: Descr.
+        TODO: Make this OS-proof.
         '''
         tor_path = os.getcwd() + self.config['file_paths']['tor']
 
-        # Kill existing tor process. TODO: Make this OS-proof.
+        # Kill existing tor process.
         os.system("taskkill /F /im tor.exe")
 
         # Run a tor process in the background, wait for it to start.
@@ -180,21 +187,66 @@ class Scraper():
             page_urls = self.get_page_urls(page_url)
             listing_urls.extend(page_urls)
 
+        # Remove the dead urls.
+        listing_urls = [url for url in listing_urls if url not in self.dead_urls]
 
         return listing_urls
 
 
-    def parse_object_data(self, soup):
+    def parse_object_data(self, url):
         '''
         soup - BS4 object.
-
-        TODO: Separate KEYVARIABLES from OPTIONAL VARIABLES. Wrap ALL optional variables with try except.
         '''
-        # Find all name and item classes withing object details class.
-        object_details_class = soup.find(class_=self.config['html_tags']['object_details'][0])
 
-        # Sometimes listings get displayed but have no info. Scraper catchers? TODO: Investigate.
+        # Get page source data, parse into a soup.
+        self.driver.get(url)
+        page_source = self.driver.page_source
+
+        soup = BeautifulSoup(page_source, 'lxml')
+
+        # TODO: Add ban check using the soup here.
+        def ban_check(soup):
+            ban = False
+            # Logs the ban.
+            if ban:
+                logging.warning('Banned with existing Tor connection.')
+
+            return False
+
+        # If the driver got banned, resets everything and reloads the page until it works or self.max_retries exceeded.
+        retries = 0
+        banned = ban_check(soup)
+        while banned:
+            # Restart the session and the driver.
+            self.session = self.restart_tor()
+            self.driver.close()
+            self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+
+            # Reload the page and recheck if it's still banned.
+            self.driver.get(url)
+            page_source = self.driver.page_source
+            soup = BeautifulSoup(page_source, 'lxml')
+            banned = ban_check(soup)
+
+            # Raise TimeoutError if retries >= self.max_retries.
+            retries += 1
+            if retries >= self.max_retries:
+                error_message = 'Max retries exceeded with url {}.'.format(url)
+                logging.error(error_message)
+                raise TimeoutError(error_message)
+
+
+
+        # Find all name and item classes within object details class. Multiple tag values in config are necessary
+        # because this website was built by monkeys.
+        object_details_class = soup.find(class_=self.config['html_tags']['object_details'])
+
+        # These either contain dead urls or scraper honeypot urls that might potentially cause bans on visit.
         if object_details_class is None:
+            with open('dead_urls.cfg', 'a') as f:
+                f.writelines('\n' + url)
+
+            logging.info('Found a dead / scraper catcher url. {}'.format(url))
             return None
 
         object_names = object_details_class.find_all(self.config['html_tags']['object_details_names'])
@@ -207,11 +259,11 @@ class Scraper():
         object_item_values = []
         for object_item in object_items:
 
-            # Single value items.
+            # Single value items (e.g. Price, SqMeters).
             if len(object_item) == 1:
                 object_item_values.append(object_item.contents[0])
 
-            # Multiple value items.
+            # Multiple value items (e.g. list of ExtraFeatures, list of Security).
             elif len(object_item) > 1:
 
                 # Tries to get list-like items.
@@ -219,13 +271,46 @@ class Scraper():
                 if len(items) != 0:
                     object_item_values.append(items)
 
-                # If the list is empty, the item is most likely single value (hence index 0), with additional ads, links, etc.
+                # If the list is empty, the item is actually a single value item, with additional info -
+                # ads, links, etc.
                 else:
                     object_item_values.append(object_item.contents[0])
 
         # Set everything as a dictionary.
         object_data = dict(zip(object_names, object_item_values))
 
+
+        # Get object description text and listing name - City, Neighbourhood, Street, Other. Store Object Url.
+        object_data['Object Description'] = soup.find(id=self.config['html_tags']['object_description']).contents
+        object_data['Listing Name'] = soup.find(class_=self.config['html_tags']['object_name']).contents[0]
+        object_data['Listing Url'] = url
+
+
+        # Get object listing statistics (views, favorites, etc.).
+        listing_statistics = soup.find(class_=self.config['html_tags']['listing_statistics'])
+
+        # Sometimes both Views and Favorites are missing, sometimes only the Favorites.
+        if listing_statistics is not None:
+            object_data[listing_statistics.contents[0]] = listing_statistics.contents[1].contents[0]
+        elif (listing_statistics is not None) and (len(listing_statistics.contents) > 2):
+            object_data['Listing Favorites'] = listing_statistics.contents[3].contents[0]
+
+
+        # Try to find realtor name and realtor organization. Both are optional variables, both can be present at the
+        # same time. Sometimes, realtor name field is present but empty.
+        realtor_name = soup.find(class_=self.config['html_tags']['realtor_name'])
+        realtor_organization = soup.find(class_=self.config['html_tags']['realtor_organization'])
+
+        # Lots of exceptions due to monkey code.
+        if (realtor_name is not None) and (realtor_name != 'Pardavėjo kontaktai') and (len(realtor_name) != 0):
+            object_data['Realtor Name'] = realtor_name.contents[0]
+            object_data['Realtor'] = 1
+
+        if realtor_organization is not None:
+            object_data['Realtor Organization'] = realtor_organization.contents[1]['href']
+
+
+        # TODO: When re-scraping  the data without selenium, this part becomes optional.
         # Find all name and item classes withing object details class.
         neighbourhood_statistics = soup.find(id=self.config['html_tags']['neighbourhood_statistics'])
 
@@ -241,53 +326,21 @@ class Scraper():
         for name, item in zip(neighbourhood_statistics_names, neighbourhood_statistics_items):
             object_data[name] = item
 
-        # Get object listing statistics (views, favorites, etc.).
-        try:
-            listing_statistics = soup.find(class_=self.config['html_tags']['listing_statistics']).contents
-            object_data[listing_statistics[0]] = listing_statistics[1].contents[0]
-        except:
-            # TODO: This should ALWAYS have at least some values, but it breaks. Investigate
-            object_data['Skelbimą peržiūrėjo (iš viso/šiandien):'] = '0/0'
-            listing_statistics = None
 
-        try:
-            object_data['Listing Favorites'] = listing_statistics[3].contents[0]
-        except:
-            object_data['Listing Favorites'] = 0
-
-        # Get object description text.
-        object_data['Object Description'] = soup.find(id=self.config['html_tags']['object_description']).contents
-
-        # Get object name - City, Neighbourhood, Street, Other.
-        object_data['Listing Name'] = soup.find(class_=self.config['html_tags']['object_name']).contents[0]
-
+        # TODO: When re-scraping  the data without selenium, this part becomes optional.
         # Get energy class rating.
         building_energy_class = soup.find(class_=self.config['html_tags']['building_energy_class'])
 
-        try:
+        if building_energy_class is not None:
             object_data['Building Energy Class'] = building_energy_class.contents[1]
             object_data['Building Energy Class Category'] = building_energy_class.contents[2]
-        except:
+        else:
             object_data['Building Energy Class'] = None
             object_data['Building Energy Class Category'] = None
 
 
-        # Check if a realtor is present, get it's name if it is.
-        object_contacts = soup.find(class_=self.config['html_tags']['no_realtor'])
-        if object_contacts is None:
-            realtor_name = soup.find(class_=self.config['html_tags']['realtor']).find(class_=self.config['html_tags']['realtor_name']).contents[0]
-            # Handles cases where the realtor is a company, not a person. TODO: Add RealtorCompany variable.
-            if realtor_name == 'Pardavėjo kontaktai':
-                object_data['Realtor Name'] = None
-                object_data['Realtor'] = False
-            else:
-                object_data['Realtor Name'] = realtor_name
-                object_data['Realtor'] = True
-        else:
-            object_data['Realtor Name'] = None
-            object_data['Realtor'] = False
-
         return object_data
+
 
     def get_object_data(self, listing_urls):
         '''
@@ -297,26 +350,16 @@ class Scraper():
 
         data = []
 
-        # TODO: Delete this / find another way of logging.
+        # TODO: Delete this / find another way of logging. Make optional?
         import tqdm
 
+        self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+
         for listing_url in tqdm.tqdm(listing_urls):
-            # Move to config.
-            driver = webdriver.Chrome('D:/Projects/Personal/Current/Rent AVM/rent-avm/scraper/chromedriver.exe')
+            data.append(self.parse_object_data(listing_url))
 
-            driver.get(listing_url)
-            page_source = driver.page_source
-            driver.close()
 
-            soup = BeautifulSoup(page_source, 'lxml')
-
-            # TODO: Add error handling based on page output.
-            try:
-                data.append(self.parse_object_data(soup))
-            except:
-                s = self.restart_tor()
-                data.append(self.parse_object_data(soup))
-
+        self.driver.close()
         return data
 
 
@@ -362,7 +405,7 @@ class Scraper():
             except:
                 continue
 
-                # Split ListingName into City, Neighbourhood, Street.
+        # Split ListingName into City, Neighbourhood, Street.
         object_data['ListingName'] = object_data['ListingName'].split(',')
         object_data['BuildingCity'] = object_data['ListingName'][0].strip()
         object_data['BuildingNeighbourhood'] = object_data['ListingName'][1].strip()
