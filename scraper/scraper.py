@@ -1,3 +1,14 @@
+'''
+Scraper wide further developments:
+    * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use stadard requests for other houses.
+    Selenium is really slow (5-10s / it), but it is nececssary to load neighbourhood statistics from the page using JS.
+
+    * TODO: Create a format verifier that reports any new fields as well as fields that were missing when they
+    shouldn't, as well as any additional field format checks (ints should be ints, cats should be cats, etc.).
+
+'''
+
+
 import os
 import time
 from subprocess import Popen
@@ -14,6 +25,7 @@ from fake_useragent import UserAgent
 import pandas as pd
 
 import logging
+import json
 
 
 class Scraper():
@@ -34,7 +46,12 @@ class Scraper():
             ]
         )
 
-        self.session = self.get_tor_session()
+        # Load config file.
+        with open("config_scraper.json") as f:
+            self.config = json.load(f)
+
+        # Start Tor and get the session.
+        self.session = self.restart_tor()
         pass
 
     def get_tor_session(self):
@@ -65,7 +82,7 @@ class Scraper():
 
         TODO: Descr.
         '''
-        tor_path = os.getcwd() + '/tor-win32-0.4.2.7/Tor/tor.exe'
+        tor_path = os.getcwd() + self.config['file_paths']['tor']
 
         # Kill existing tor process. TODO: Make this OS-proof.
         os.system("taskkill /F /im tor.exe")
@@ -94,7 +111,7 @@ class Scraper():
                 soup = BeautifulSoup(page.content, 'html.parser')
 
                 # Extract all page number buttons to find the maximum digit value.
-                page_number_buttons = str(soup.find_all(class_='page-bt'))
+                page_number_buttons = str(soup.find_all(class_=self.config['html_tags']['page_number_button']))
                 page_number_buttons = re.findall('\d+', page_number_buttons)
 
                 total_pages = max([int(number) for number in page_number_buttons])
@@ -127,7 +144,7 @@ class Scraper():
                 soup = BeautifulSoup(page.content, 'html.parser')
 
                 # Extract all listings and get their urls.
-                listings = soup.find_all(class_='list-adress')
+                listings = soup.find_all(class_=self.config['html_tags']['listing_url'])
                 listings_urls = [listing.find('a', href=True)['href'] for listing in listings]
 
                 correct_output = True
@@ -145,21 +162,20 @@ class Scraper():
         raise TimeoutError(error_message)
 
 
-    def get_urls(self, url_main='https://www.aruodas.lt/butu-nuoma/', url_listings='https://www.aruodas.lt/butu-nuoma/puslapis/', url_listings_settings='/?FOrder=AddDate&detailed_search=1'):
+    def get_urls(self):
         '''
         TODO: Descr.
-        # TODO: Move parameters to config file.
 
         :return:
         '''
 
-        total_pages = self.get_number_of_pages(url_main)
+        total_pages = self.get_number_of_pages(self.config['urls']['main'])
 
-        # Get listing urls for all of the pages. If an exception occurs while scraping, prints the exception.
+        # Get listing urls for all of the pages.
         listing_urls = []
         for page_number in range(1, total_pages + 1):
 
-            page_url = url_listings + str(page_number) + url_listings_settings
+            page_url = self.config['urls']['listings'] + str(page_number) + self.config['urls']['listings_settings']
 
             page_urls = self.get_page_urls(page_url)
             listing_urls.extend(page_urls)
@@ -168,45 +184,21 @@ class Scraper():
         return listing_urls
 
 
-    def parse_object_data(self, soup, html_tags=None):
+    def parse_object_data(self, soup):
         '''
         soup - BS4 object.
 
-        TODO: Create env variable for html tags or save them to a file somehow. Move to config file.
         TODO: Separate KEYVARIABLES from OPTIONAL VARIABLES. Wrap ALL optional variables with try except.
         '''
-
-        if html_tags is None:
-            pass
-
-        # Initialize HTML class, id, etc. tags.
-        html_tag_listing_statistics = 'obj-top-stats'
-
-        html_tag_building_energy_class = 'energy-class-tooltip'
-
-        html_tag_object_details = ['obj-details', 'obj-details ']  # Weird, but necessary.
-        html_tag_object_details_names = 'dt'
-        html_tag_object_details_items = 'dd'
-        html_tag_object_description = 'collapsedText'
-        html_tag_object_name = 'obj-header-text'
-
-        html_tag_neighbourhood_statistics = 'advertStatisticHolder'
-        html_tag_neighbourhood_statistics_names = 'cell-text'
-        html_tag_neighbourhood_statistics_items = 'cell-data'
-
-        html_tag_realtor = 'obj-contacts'
-        html_tag_realtor_name = 'contacts-title'
-        html_tag_no_realtor = 'obj-contacts simple'
-
         # Find all name and item classes withing object details class.
-        object_details_class = soup.find(class_=html_tag_object_details[0])
+        object_details_class = soup.find(class_=self.config['html_tags']['object_details'][0])
 
         # Sometimes listings get displayed but have no info. Scraper catchers? TODO: Investigate.
         if object_details_class is None:
             return None
 
-        object_names = object_details_class.find_all(html_tag_object_details_names)
-        object_items = object_details_class.find_all(html_tag_object_details_items)
+        object_names = object_details_class.find_all(self.config['html_tags']['object_details_names'])
+        object_items = object_details_class.find_all(self.config['html_tags']['object_details_items'])
 
         # Get field names.
         object_names = [item.contents[0] for item in object_names]
@@ -223,7 +215,7 @@ class Scraper():
             elif len(object_item) > 1:
 
                 # Tries to get list-like items.
-                items = [item.contents[0] for item in object_item.find_all(class_='special-comma')]
+                items = [item.contents[0] for item in object_item.find_all(class_=self.config['html_tags']['object_details_items_separator'])]
                 if len(items) != 0:
                     object_item_values.append(items)
 
@@ -235,12 +227,12 @@ class Scraper():
         object_data = dict(zip(object_names, object_item_values))
 
         # Find all name and item classes withing object details class.
-        neighbourhood_statistics = soup.find(id=html_tag_neighbourhood_statistics)
+        neighbourhood_statistics = soup.find(id=self.config['html_tags']['neighbourhood_statistics'])
 
         neighbourhood_statistics_names = neighbourhood_statistics.find_all(
-            class_=html_tag_neighbourhood_statistics_names)
+            class_=self.config['html_tags']['neighbourhood_statistics_names'])
         neighbourhood_statistics_items = neighbourhood_statistics.find_all(
-            class_=html_tag_neighbourhood_statistics_items)
+            class_=self.config['html_tags']['neighbourhood_statistics_items'])
 
         # Extract the name and the item values, add them to the dictionary.
         neighbourhood_statistics_names = [item.contents[0] for item in neighbourhood_statistics_names]
@@ -251,7 +243,7 @@ class Scraper():
 
         # Get object listing statistics (views, favorites, etc.).
         try:
-            listing_statistics = soup.find(class_=html_tag_listing_statistics).contents
+            listing_statistics = soup.find(class_=self.config['html_tags']['listing_statistics']).contents
             object_data[listing_statistics[0]] = listing_statistics[1].contents[0]
         except:
             # TODO: This should ALWAYS have at least some values, but it breaks. Investigate
@@ -264,13 +256,13 @@ class Scraper():
             object_data['Listing Favorites'] = 0
 
         # Get object description text.
-        object_data['Object Description'] = soup.find(id=html_tag_object_description).contents
+        object_data['Object Description'] = soup.find(id=self.config['html_tags']['object_description']).contents
 
         # Get object name - City, Neighbourhood, Street, Other.
-        object_data['Listing Name'] = soup.find(class_=html_tag_object_name).contents[0]
+        object_data['Listing Name'] = soup.find(class_=self.config['html_tags']['object_name']).contents[0]
 
         # Get energy class rating.
-        building_energy_class = soup.find(class_=html_tag_building_energy_class)
+        building_energy_class = soup.find(class_=self.config['html_tags']['building_energy_class'])
 
         try:
             object_data['Building Energy Class'] = building_energy_class.contents[1]
@@ -279,10 +271,11 @@ class Scraper():
             object_data['Building Energy Class'] = None
             object_data['Building Energy Class Category'] = None
 
+
         # Check if a realtor is present, get it's name if it is.
-        object_contacts = soup.find(class_=html_tag_no_realtor)
+        object_contacts = soup.find(class_=self.config['html_tags']['no_realtor'])
         if object_contacts is None:
-            realtor_name = soup.find(class_=html_tag_realtor).find(class_=html_tag_realtor_name).contents[0]
+            realtor_name = soup.find(class_=self.config['html_tags']['realtor']).find(class_=self.config['html_tags']['realtor_name']).contents[0]
             # Handles cases where the realtor is a company, not a person. TODO: Add RealtorCompany variable.
             if realtor_name == 'Pardavėjo kontaktai':
                 object_data['Realtor Name'] = None
