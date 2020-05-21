@@ -1,15 +1,13 @@
-'''
+"""
 Scraper wide further developments:
-    * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use stadard requests for other
-    houses. Selenium is really slow (5-10s / it), but it is nececssary to load neighbourhood statistics from the page
+    * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use standard requests for other
+    houses. Selenium is really slow (5-10s / it), but it is necessary to load neighbourhood statistics from the page
     using JS.
 
     * TODO: Create a format verifier that reports any new fields as well as fields that were missing when they
     shouldn't, as well as any additional field format checks (ints should be ints, cats should be cats, etc.).
 
-'''
-
-
+"""
 import os
 from subprocess import Popen
 
@@ -29,15 +27,20 @@ import logging
 import tqdm
 
 
-
-class Scraper():
+class Scraper:
     def __init__(self, max_retries=3, verbose=True):
-        '''
-        TODO Descr.
-        '''
+        """
+        Class that scrapes the given website. Use the scraping method is Scraper().scrape.
+
+        Parameters
+        ----------
+        max_retries (int): Number of retries to reset the Tor connections, selenium browsers etc.
+        verbose (bool): Whether to display a scraping progress bar.
+        """
+
         # Initialize class variables.
         self.max_retries = max_retries
-        self.verbose = True
+        self.verbose = verbose
 
         # Setup Logging.
         logging.basicConfig(
@@ -55,15 +58,18 @@ class Scraper():
 
         # Start Tor and get the session.
         self.session = self.restart_tor()
-
         pass
 
     def get_tor_session(self):
-        '''
-        TODO: Descr.
+        """
+        Creates a requests.session object using Tor socks5 proxie ports.
 
-        :return:
-        '''
+
+        Returns
+        -------
+        requests.session object
+        """
+
         # Use Tor ports for a requests.session.
         session = requests.session()
         session.proxies = {
@@ -77,32 +83,50 @@ class Scraper():
         logging.info('Built a Tor session at IP {}.'.format(session.get('http://httpbin.org/ip').json()['origin']))
         return session
 
-
     def restart_tor(self):
-        '''
-        A forceful hack since tor doesn't function as intended on my windows and none of the solution work. Too bad! https://www.youtube.com/watch?v=k238XpMMn38
+        """
+        Restarts Tor to generate a new IP address.
+
+        A forceful hack since Tor doesn't function as intended on my windows and none of the solution work.
+        Too bad! https://www.youtube.com/watch?v=k238XpMMn38
+
+        TODO: Currently works on windows only! Not even tested properly! Make this OS-proof.
 
 
-        TODO: Descr.
-        TODO: Make this OS-proof.
-        '''
-        tor_path = os.getcwd() + self.config['file_paths']['tor']
+        Returns
+        -------
+        requests.session object
+        """
 
         # Kill existing tor process.
         os.system("taskkill /F /im tor.exe")
 
         # Run a tor process in the background, wait for it to start.
+        tor_path = os.getcwd() + self.config['file_paths']['tor']
         Popen(tor_path, shell=True)
 
         time.sleep(1)
-
         return self.get_tor_session()
 
-
     def get_number_of_pages(self, url):
-        '''
-        TODO: Descr.
-        '''
+        """
+        Gets the total number of pages using the page button numeration at the end of the page.
+
+        Automatically restarts in the case of failing to get the data.
+
+
+        Parameters
+        ----------
+        url (str): Main page url that has the button numeration.
+
+        Returns
+        -------
+        (int):  Number of total pages.
+
+        Raises
+        ------
+        TimeoutError: In the case of retries exceeding self.max_retries.
+        """
 
         # Error handling with limited retries. Will log error messages and restart the Tor connection, assuming it was
         # banned. Otherwise will continue.
@@ -134,11 +158,24 @@ class Scraper():
         logging.error(error_message)
         raise TimeoutError(error_message)
 
-
     def get_page_urls(self, url):
-        '''
-        TODO: Descr.
-        '''
+        """
+        Gets all the listing_urls' urls on the given page.
+
+
+        Parameters
+        ----------
+        url (str): page that will be searched on.
+
+        Returns
+        -------
+        (list): Listing urls found in the given page.
+
+        Raises
+        ------
+        TimeoutError: In the case of retries exceeding self.max_retries.
+        """
+
         correct_output = False
         retries = 0
         while (not correct_output) or (retries < self.max_retries):
@@ -165,36 +202,51 @@ class Scraper():
         logging.error(error_message)
         raise TimeoutError(error_message)
 
-
     def get_urls(self):
-        '''
-        TODO: Descr.
+        """
+        Gets all of the listing urls from all of the pages of the website. Combines get_number_of_pages and
+        get_page_urls methods.
 
-        :return:
-        '''
+
+        Returns
+        -------
+        (list): List of all the urls on the website.
+        """
 
         total_pages = self.get_number_of_pages(self.config['urls']['main'])
 
         # Get listing urls for all of the pages.
         listing_urls = []
         for page_number in range(1, total_pages + 1):
-
             page_url = self.config['urls']['listings'] + str(page_number) + self.config['urls']['listings_settings']
 
             page_urls = self.get_page_urls(page_url)
             listing_urls.extend(page_urls)
 
-        # There are urls that are auto-generated with each page visit, possibly honeypots for scraper cathers.
+        # There are urls that are auto-generated with each page visit, possibly honeypots for scraper catchers.
         listing_urls = [url for url in listing_urls if self.config['urls']['honeypot'] not in url]
 
         return listing_urls
 
-
     def parse_object_data(self, url):
-        '''
-        soup - BS4 object.
+        """
+        Scrapes and parses the object data for the given url.
 
-        '''
+        Handles bans by automatically restarting the tor connection.
+
+
+        Parameters
+        ----------
+        url (str): Page url to be scraped.
+
+        Returns
+        -------
+        (dict): Object data found in the given url.
+
+        Raises
+        ------
+        TimeoutError: In the case of retries exceeding self.max_retries while restarting in the case of a ban.
+        """
 
         # Get page source data, parse into a soup.
         self.driver.get(url)
@@ -203,7 +255,7 @@ class Scraper():
         soup = BeautifulSoup(page_source, 'lxml')
 
         # TODO: Add ban check using the soup here, once you get banned. This might not ever happen, because monkeys.
-        def ban_check(soup):
+        def ban_check(page_soup):
             ban = False
             # Logs the ban.
             if ban:
@@ -233,8 +285,6 @@ class Scraper():
                 logging.error(error_message)
                 raise TimeoutError(error_message)
 
-
-
         # Find all name and item classes within object details class. Multiple tag values in config are necessary
         # because this website was built by monkeys.
         object_details_class = soup.find(class_=self.config['html_tags']['object_details'])
@@ -262,7 +312,8 @@ class Scraper():
             elif len(object_item) > 1:
 
                 # Tries to get list-like items.
-                items = [item.contents[0] for item in object_item.find_all(class_=self.config['html_tags']['object_details_items_separator'])]
+                items = [item.contents[0] for item in
+                         object_item.find_all(class_=self.config['html_tags']['object_details_items_separator'])]
                 if len(items) != 0:
                     object_item_values.append(items)
 
@@ -274,12 +325,10 @@ class Scraper():
         # Set everything as a dictionary.
         object_data = dict(zip(object_names, object_item_values))
 
-
         # Get object description text and listing name - City, Neighbourhood, Street, Other. Store Object Url.
         object_data['Object Description'] = soup.find(id=self.config['html_tags']['object_description']).contents
         object_data['Listing Name'] = soup.find(class_=self.config['html_tags']['object_name']).contents[0]
         object_data['Listing Url'] = url
-
 
         # Get object listing statistics (views, favorites, etc.).
         listing_statistics = soup.find(class_=self.config['html_tags']['listing_statistics'])
@@ -289,7 +338,6 @@ class Scraper():
             object_data[listing_statistics.contents[0]] = listing_statistics.contents[1].contents[0]
         elif (listing_statistics is not None) and (len(listing_statistics.contents) > 2):
             object_data['Listing Favorites'] = listing_statistics.contents[3].contents[0]
-
 
         # Try to find realtor name and realtor organization. Both are optional variables, both can be present at the
         # same time. Sometimes, realtor name field is present but empty.
@@ -303,7 +351,6 @@ class Scraper():
 
         if realtor_organization is not None:
             object_data['Realtor Organization'] = realtor_organization.contents[1]['href']
-
 
         # TODO: When re-scraping  the data without selenium, this part becomes optional.
         # Find all name and item classes withing object details class.
@@ -321,7 +368,6 @@ class Scraper():
         for name, item in zip(neighbourhood_statistics_names, neighbourhood_statistics_items):
             object_data[name] = item
 
-
         # TODO: When re-scraping  the data without selenium, this part becomes optional.
         # Get energy class rating.
         building_energy_class = soup.find(class_=self.config['html_tags']['building_energy_class'])
@@ -333,17 +379,27 @@ class Scraper():
             object_data['Building Energy Class'] = None
             object_data['Building Energy Class Category'] = None
 
-
         return object_data
 
-
     def get_object_data(self, listing_urls):
-        '''
-        TODO: Descr.
-        :return:
-        '''
+        """
+        Gets object data for all of the urls in listing_urls.
+
+        Automatically restarts selenium in the case of a crash.
 
 
+        Parameters
+        ----------
+        listing_urls (list): Urls to get the object data from.
+
+        Returns
+        -------
+        (list): Object data for each of the given urls.
+
+        Raises
+        ------
+        TimeoutError: In the case of retries exceeding self.max_retries while restarting selenium.
+        """
 
         # Optional parameter to display a progress bar.
         if self.verbose:
@@ -383,16 +439,28 @@ class Scraper():
                         logging.error(error_message)
                         raise TimeoutError(error_message)
 
-
         self.driver.quit()
         return data
 
+    def process_object_data(self, data):
+        """
+        Processes the object data of the given dictionary.
 
-    def process_object_data(self, object_data):
-        '''
-        TODO: Descr.
-        # TODO: Fix all the bugs, make most of the parameters optional.
-        '''
+        Sets the correct formats, processes strings into readable formats, creates categorical and pseudo-categorical
+        variables.
+
+        TODO: Fix all the bugs, make most of the parameters optional.
+
+
+        Parameters
+        ----------
+        data (dict): Dictionary to process.
+
+        Returns
+        -------
+        object_data (dict): Processed dictionary.
+        """
+
         variables_integer = ['Plotas', 'KainaMėn', 'KambariųSk', 'Aukštas', 'AukštųSk', 'Metai', 'ArtimiausiasDarželis',
                              'ArtimiausiaMokymoĮstaiga', 'ArtimiausiaParduotuvė', 'ViešojoTransportoStotelė',
                              'Nusikaltimai500MSpinduliuPraėjusįMėnesį']
@@ -401,26 +469,31 @@ class Scraper():
         variables_drop = []
 
         # Transform keys from whatever messy format to VariableName.
-        keys = list(object_data.keys())
+        keys = list(data.keys())
         keys = [key.strip() for key in keys]
         keys = [key.translate(str.maketrans('', '', string.punctuation)) for key in keys]
         keys = [''.join(key.lower().title().split(' ')) for key in keys]
 
-        object_data = dict(zip(keys, list(object_data.values())))
+        object_data = dict(zip(keys, list(data.values())))
 
         # Convert integer variables to integer.
         for variable in variables_integer:
             # Handles cases when variable is missing:
             try:
                 object_data[variable] = int(re.findall('\d+', object_data[variable])[0])
-            except:
+            except KeyError:
                 continue
 
         # Remove whitespace from categorical variables.
         for variable in variables_categorical:
-            object_data[variable] = object_data[variable].strip()
+            # Handles cases when variable is missing:
+            try:
+                object_data[variable] = object_data[variable].strip()
+            except KeyError:
+                continue
 
-        # Transform lists of variables into pseudo categorical variables. E.g. Variable: ['feat1', 'feat2'] -> Variable_feat1: 1, Variable_feat2: 1.
+        # Transform lists of variables into pseudo categorical variables.
+        # E.g. Variable: ['feat1', 'feat2'] -> Variable_feat1: 1, Variable_feat2: 1.
         for variable in variables_lists:
             try:
                 # Convert space delimited text to TitleCamelCase. E.g. 'This house' -> 'ThisHouse'.
@@ -431,7 +504,7 @@ class Scraper():
                     object_data[variable + '_' + feature] = 1
 
                 variables_drop.append(variable)
-            except:
+            except KeyError:
                 continue
 
         # Split ListingName into City, Neighbourhood, Street.
@@ -440,16 +513,16 @@ class Scraper():
         object_data['BuildingNeighbourhood'] = object_data['ListingName'][1].strip()
         object_data['BuildingStreet'] = object_data['ListingName'][2].strip()
 
+        # Transform ObjectDescription into a single string, as well as replacing <br/>'s with \n.
+        object_data['ObjectDescription'] = ''.join([str(item) for item in object_data['ObjectDescription']])
+        object_data['ObjectDescription'] = re.sub('<br/s*?>', '\n', object_data['ObjectDescription'])
+
         # Split Total/Today views into separate variables.
         if 'SkelbimąPeržiūrėjoIšVisošiandien' in list(object_data.keys()):
             object_data['SkelbimąPeržiūrėjoIšVisošiandien'] = object_data['SkelbimąPeržiūrėjoIšVisošiandien'].split('/')
             object_data['ListingViewsTotal'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][0])
             object_data['ListingViewsToday'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][1])
             variables_drop.append('SkelbimąPeržiūrėjoIšVisošiandien')
-
-        # Transform ObjectDescription into a single string, as well as replacing <br/>'s with \n.
-        object_data['ObjectDescription'] = ''.join([str(item) for item in object_data['ObjectDescription']])
-        object_data['ObjectDescription'] = re.sub('<br/s*?>', '\n', object_data['ObjectDescription'])
 
         # Drop no longer required variables.
         variables_drop.extend(['ListingName'])
@@ -458,13 +531,21 @@ class Scraper():
 
         return object_data
 
-
     def scrape(self):
-        '''
-        TODO: Descr.
+        """
+        Main method of scraping combining all of the methods within the class.
 
-        :return:
-        '''
+        Uses the config_scraper.json configuration to scrape the given website.
+
+        TODO: Object description might have ,'s and "'s, which make saving to csv dangerous. Figure out how to fix it.
+        TODO: High memory usage due to storing multiple dicts into a list. Preprocess and append to a dataframe for
+         memory optimization.
+
+        Returns
+        -------
+        pandas.DataFrame: Data containing all of the processed-raw (none of the information removed) lissting data from
+        the website.
+        """
 
         logging.info('Getting the urls.')
         listing_urls = self.get_urls()
