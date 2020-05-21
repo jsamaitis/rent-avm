@@ -1,7 +1,5 @@
 '''
 Scraper wide further developments:
-    * TODO: Aad progress logs to monitor (e.g. getting urls, getting pages, report every 10 urls, etc.).
-
     * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use stadard requests for other
     houses. Selenium is really slow (5-10s / it), but it is nececssary to load neighbourhood statistics from the page
     using JS.
@@ -13,31 +11,33 @@ Scraper wide further developments:
 
 
 import os
-import time
 from subprocess import Popen
 
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from fake_useragent import UserAgent
 
 import re
 import string
 
-from fake_useragent import UserAgent
-
 import pandas as pd
-
-import logging
 import json
+
+import time
+import logging
+import tqdm
+
 
 
 class Scraper():
-    def __init__(self, max_retries=3):
+    def __init__(self, max_retries=3, verbose=True):
         '''
         TODO Descr.
         '''
         # Initialize class variables.
         self.max_retries = max_retries
+        self.verbose = True
 
         # Setup Logging.
         logging.basicConfig(
@@ -52,9 +52,6 @@ class Scraper():
         # Load the config files.
         with open("config_scraper.json") as f:
             self.config = json.load(f)
-
-        with open('dead_urls.cfg', 'r') as f:
-            self.dead_urls = [line.strip() for line in f.readlines()]
 
         # Start Tor and get the session.
         self.session = self.restart_tor()
@@ -111,7 +108,7 @@ class Scraper():
         # banned. Otherwise will continue.
         correct_output = False
         retries = 0
-        while (correct_output) or (retries < self.max_retries):
+        while (not correct_output) or (retries < self.max_retries):
             try:
                 # Scrape the main page to get the total number of pages.
                 page = self.session.get(url)
@@ -144,7 +141,7 @@ class Scraper():
         '''
         correct_output = False
         retries = 0
-        while (correct_output) or (retries < self.max_retries):
+        while (not correct_output) or (retries < self.max_retries):
             try:
                 # Get page contents and put them in a "soup".
                 page = self.session.get(url)
@@ -187,8 +184,8 @@ class Scraper():
             page_urls = self.get_page_urls(page_url)
             listing_urls.extend(page_urls)
 
-        # Remove the dead urls.
-        listing_urls = [url for url in listing_urls if url not in self.dead_urls]
+        # There are urls that are auto-generated with each page visit, possibly honeypots for scraper cathers.
+        listing_urls = [url for url in listing_urls if self.config['urls']['honeypot'] not in url]
 
         return listing_urls
 
@@ -196,6 +193,7 @@ class Scraper():
     def parse_object_data(self, url):
         '''
         soup - BS4 object.
+
         '''
 
         # Get page source data, parse into a soup.
@@ -204,7 +202,7 @@ class Scraper():
 
         soup = BeautifulSoup(page_source, 'lxml')
 
-        # TODO: Add ban check using the soup here.
+        # TODO: Add ban check using the soup here, once you get banned. This might not ever happen, because monkeys.
         def ban_check(soup):
             ban = False
             # Logs the ban.
@@ -219,7 +217,7 @@ class Scraper():
         while banned:
             # Restart the session and the driver.
             self.session = self.restart_tor()
-            self.driver.close()
+            self.driver.quit()
             self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
 
             # Reload the page and recheck if it's still banned.
@@ -243,9 +241,6 @@ class Scraper():
 
         # These either contain dead urls or scraper honeypot urls that might potentially cause bans on visit.
         if object_details_class is None:
-            with open('dead_urls.cfg', 'a') as f:
-                f.writelines('\n' + url)
-
             logging.info('Found a dead / scraper catcher url. {}'.format(url))
             return None
 
@@ -348,30 +343,62 @@ class Scraper():
         :return:
         '''
 
+
+
+        # Optional parameter to display a progress bar.
+        if self.verbose:
+            loop = tqdm.tqdm(listing_urls)
+        else:
+            loop = listing_urls
+
         data = []
-
-        # TODO: Delete this / find another way of logging. Make optional?
-        import tqdm
-
         self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+        for listing_url in loop:
 
-        for listing_url in tqdm.tqdm(listing_urls):
-            data.append(self.parse_object_data(listing_url))
+            # Restarts selenium if it crashes (which happen quite often).
+            correct_output = False
+            retries = 0
+            while not correct_output:
+                try:
+                    listing_data = self.parse_object_data(listing_url)
+
+                    if listing_data is not None:
+                        data.append(listing_data)
+
+                    correct_output = True
+                    continue
+
+                except Exception as e:
+                    logging.warning('Exception occurred at parse_object_data:')
+                    logging.warning(e)
+
+                    # Restart the driver.
+                    self.driver.quit()
+                    self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+
+                    # Raise TimeoutError if retries >= self.max_retries.
+                    retries += 1
+                    if retries >= self.max_retries:
+                        error_message = 'Max retries exceeded with url {}.'.format(listing_url)
+                        logging.error(error_message)
+                        raise TimeoutError(error_message)
 
 
-        self.driver.close()
+        self.driver.quit()
         return data
 
 
     def process_object_data(self, object_data):
         '''
         TODO: Descr.
+        # TODO: Fix all the bugs, make most of the parameters optional.
         '''
         variables_integer = ['Plotas', 'KainaMėn', 'KambariųSk', 'Aukštas', 'AukštųSk', 'Metai', 'ArtimiausiasDarželis',
                              'ArtimiausiaMokymoĮstaiga', 'ArtimiausiaParduotuvė', 'ViešojoTransportoStotelė',
                              'Nusikaltimai500MSpinduliuPraėjusįMėnesį']
         variables_categorical = ['PastatoTipas', 'Šildymas', 'Įrengimas']
         variables_lists = ['Ypatybės', 'PapildomosPatalpos', 'PapildomaĮranga', 'Apsauga']
+        variables_drop = []
 
         # Transform keys from whatever messy format to VariableName.
         keys = list(object_data.keys())
@@ -402,6 +429,8 @@ class Scraper():
                 # Create a pseudo categorical variable where multiple values in a category is present.
                 for feature in object_data[variable]:
                     object_data[variable + '_' + feature] = 1
+
+                variables_drop.append(variable)
             except:
                 continue
 
@@ -412,18 +441,18 @@ class Scraper():
         object_data['BuildingStreet'] = object_data['ListingName'][2].strip()
 
         # Split Total/Today views into separate variables.
-        object_data['SkelbimąPeržiūrėjoIšVisošiandien'] = object_data['SkelbimąPeržiūrėjoIšVisošiandien'].split('/')
-        object_data['ListingViewsTotal'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][0])
-        object_data['ListingViewsToday'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][1])
+        if 'SkelbimąPeržiūrėjoIšVisošiandien' in list(object_data.keys()):
+            object_data['SkelbimąPeržiūrėjoIšVisošiandien'] = object_data['SkelbimąPeržiūrėjoIšVisošiandien'].split('/')
+            object_data['ListingViewsTotal'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][0])
+            object_data['ListingViewsToday'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][1])
+            variables_drop.append('SkelbimąPeržiūrėjoIšVisošiandien')
 
         # Transform ObjectDescription into a single string, as well as replacing <br/>'s with \n.
         object_data['ObjectDescription'] = ''.join([str(item) for item in object_data['ObjectDescription']])
         object_data['ObjectDescription'] = re.sub('<br/s*?>', '\n', object_data['ObjectDescription'])
 
         # Drop no longer required variables.
-        variables_drop = []
-        variables_drop.extend(variables_lists)
-        variables_drop.extend(['ListingName', 'SkelbimąPeržiūrėjoIšVisošiandien'])
+        variables_drop.extend(['ListingName'])
         for variable in variables_drop:
             object_data.pop(variable)
 
@@ -437,10 +466,17 @@ class Scraper():
         :return:
         '''
 
+        logging.info('Getting the urls.')
         listing_urls = self.get_urls()
-        data = self.get_object_data(listing_urls)
-        # Transform list of dicts into a single DataFrame.
-        df = pd.DataFrame(map(pd.Series, map(self.process_object_data, data)))
+        logging.info('Getting the urls was successful.')
 
+        logging.info('Getting the object data.')
+        data = self.get_object_data(listing_urls)
+        logging.info('Getting the object data was successful.')
+
+        # Transform list of dicts into a single DataFrame.
+        logging.info('Processing the object data.')
+        df = pd.DataFrame(map(pd.Series, map(self.process_object_data, data)))
+        logging.info('Processing the object data was succesful, returning the DataFrame.')
 
         return df

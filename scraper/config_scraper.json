@@ -26,7 +26,8 @@
   "urls":{
     "main": "https://www.aruodas.lt/butu-nuoma/",
     "listings": "https://www.aruodas.lt/butu-nuoma/puslapis/",
-    "listings_settings": "/?FOrder=AddDate&detailed_search=1"
+    "listings_settings": "/?FOrder=AddDate&detailed_search=1",
+    "honeypot": "https://www.aruodas.lt/butai-vilniuje-pasilaiciuose-laisves-pr-4"
   },
 
   "file_paths": {
