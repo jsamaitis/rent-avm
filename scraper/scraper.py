@@ -7,6 +7,8 @@ Scraper wide further developments:
     * TODO: Create a format verifier that reports any new fields as well as fields that were missing when they
     shouldn't, as well as any additional field format checks (ints should be ints, cats should be cats, etc.).
 
+    * TODO: Add date of scraping as a variable.
+
 """
 import os
 from subprocess import Popen
@@ -344,8 +346,9 @@ class Scraper:
         realtor_name = soup.find(class_=self.config['html_tags']['realtor_name'])
         realtor_organization = soup.find(class_=self.config['html_tags']['realtor_organization'])
 
-        # Lots of exceptions due to monkey code.
-        if (realtor_name is not None) and (realtor_name != 'Pardavėjo kontaktai') and (len(realtor_name) != 0):
+        # Lots of specific exceptions due to monkey code. Don't try to uderstand and, not, etc. statemets.
+        # It works as intended and you should be happy about it.
+        if (realtor_name is not None) and (len(realtor_name) != 0) and (not ('Pardavėjo kontaktai' in realtor_name.contents[0]) and not ('Nuomotojo kontaktai' in realtor_name.contents[0])):
             object_data['Realtor Name'] = realtor_name.contents[0]
             object_data['Realtor'] = 1
 
@@ -373,74 +376,13 @@ class Scraper:
         building_energy_class = soup.find(class_=self.config['html_tags']['building_energy_class'])
 
         if building_energy_class is not None:
-            object_data['Building Energy Class'] = building_energy_class.contents[1]
+            object_data['Building Energy Class'] = building_energy_class.contents[1].contents[0]
             object_data['Building Energy Class Category'] = building_energy_class.contents[2]
         else:
             object_data['Building Energy Class'] = None
             object_data['Building Energy Class Category'] = None
 
         return object_data
-
-    def get_object_data(self, listing_urls):
-        """
-        Gets object data for all of the urls in listing_urls.
-
-        Automatically restarts selenium in the case of a crash.
-
-
-        Parameters
-        ----------
-        listing_urls (list): Urls to get the object data from.
-
-        Returns
-        -------
-        (list): Object data for each of the given urls.
-
-        Raises
-        ------
-        TimeoutError: In the case of retries exceeding self.max_retries while restarting selenium.
-        """
-
-        # Optional parameter to display a progress bar.
-        if self.verbose:
-            loop = tqdm.tqdm(listing_urls)
-        else:
-            loop = listing_urls
-
-        data = []
-        self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
-        for listing_url in loop:
-
-            # Restarts selenium if it crashes (which happen quite often).
-            correct_output = False
-            retries = 0
-            while not correct_output:
-                try:
-                    listing_data = self.parse_object_data(listing_url)
-
-                    if listing_data is not None:
-                        data.append(listing_data)
-
-                    correct_output = True
-                    continue
-
-                except Exception as e:
-                    logging.warning('Exception occurred at parse_object_data:')
-                    logging.warning(e)
-
-                    # Restart the driver.
-                    self.driver.quit()
-                    self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
-
-                    # Raise TimeoutError if retries >= self.max_retries.
-                    retries += 1
-                    if retries >= self.max_retries:
-                        error_message = 'Max retries exceeded with url {}.'.format(listing_url)
-                        logging.error(error_message)
-                        raise TimeoutError(error_message)
-
-        self.driver.quit()
-        return data
 
     def process_object_data(self, data):
         """
@@ -464,7 +406,9 @@ class Scraper:
         variables_integer = ['Plotas', 'KainaMėn', 'KambariųSk', 'Aukštas', 'AukštųSk', 'Metai', 'ArtimiausiasDarželis',
                              'ArtimiausiaMokymoĮstaiga', 'ArtimiausiaParduotuvė', 'ViešojoTransportoStotelė',
                              'Nusikaltimai500MSpinduliuPraėjusįMėnesį']
-        variables_categorical = ['PastatoTipas', 'Šildymas', 'Įrengimas']
+        variables_categorical = ['PastatoTipas', 'Šildymas', 'Įrengimas', 'NamoNumeris',
+                                 'PastatoEnergijosSuvartojimoKlasė', 'ButoNumeris', 'BuildingEnergyClassCategory',
+                                 'VidutiniškaiTiekKainuotųŠildymas1Mėn']
         variables_lists = ['Ypatybės', 'PapildomosPatalpos', 'PapildomaĮranga', 'Apsauga']
         variables_drop = []
 
@@ -489,7 +433,7 @@ class Scraper:
             # Handles cases when variable is missing:
             try:
                 object_data[variable] = object_data[variable].strip()
-            except KeyError:
+            except (KeyError, AttributeError):
                 continue
 
         # Transform lists of variables into pseudo categorical variables.
@@ -524,12 +468,79 @@ class Scraper:
             object_data['ListingViewsToday'] = int(object_data['SkelbimąPeržiūrėjoIšVisošiandien'][1])
             variables_drop.append('SkelbimąPeržiūrėjoIšVisošiandien')
 
-        # Drop no longer required variables.
+        # Transform "\n         69,420 €/mėn." format into a float.
+        if 'VidutiniškaiTiekKainuotųŠildymas1Mėn' in list(object_data.keys()):
+            heating = object_data['VidutiniškaiTiekKainuotųŠildymas1Mėn'].strip()
+            heating = re.findall('\d+,\d+', heating)[0]
+            object_data['VidutiniškaiTiekKainuotųŠildymas1Mėn'] = float(heating.replace(',', '.'))
+
+            # Drop no longer required variables.
         variables_drop.extend(['ListingName'])
         for variable in variables_drop:
             object_data.pop(variable)
 
         return object_data
+
+    def get_object_data(self, listing_urls):
+        """
+        Gets object data for all of the urls in listing_urls.
+
+        Automatically restarts selenium in the case of a crash.
+
+
+        Parameters
+        ----------
+        listing_urls (list): Urls to get the object data from.
+
+        Returns
+        -------
+        (list): Object data for each of the given urls.
+
+        Raises
+        ------
+        TimeoutError: In the case of retries exceeding self.max_retries while restarting selenium.
+        """
+
+        # Optional parameter to display a progress bar.
+        if self.verbose:
+            loop = tqdm.tqdm(listing_urls[:500])
+        else:
+            loop = listing_urls
+
+        data = pd.DataFrame()
+        self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+        for listing_url in loop:
+
+            # Restarts selenium if it crashes (which happen quite often).
+            correct_output = False
+            retries = 0
+            while not correct_output:
+                try:
+                    listing_data = self.parse_object_data(listing_url)
+
+                    if listing_data is not None:
+                        data = data.append(pd.Series(self.process_object_data(listing_data)), ignore_index=True)
+
+                    correct_output = True
+                    continue
+
+                except Exception as e:
+                    logging.warning('Exception occurred at parse_object_data:')
+                    logging.warning(e)
+
+                    # Restart the driver.
+                    self.driver.quit()
+                    self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+
+                    # Raise TimeoutError if retries >= self.max_retries.
+                    retries += 1
+                    if retries >= self.max_retries:
+                        error_message = 'Max retries exceeded with url {}.'.format(listing_url)
+                        logging.error(error_message)
+                        raise TimeoutError(error_message)
+
+        self.driver.quit()
+        return data
 
     def scrape(self):
         """
@@ -538,8 +549,6 @@ class Scraper:
         Uses the config_scraper.json configuration to scrape the given website.
 
         TODO: Object description might have ,'s and "'s, which make saving to csv dangerous. Figure out how to fix it.
-        TODO: High memory usage due to storing multiple dicts into a list. Preprocess and append to a dataframe for
-         memory optimization.
 
         Returns
         -------
@@ -551,13 +560,8 @@ class Scraper:
         listing_urls = self.get_urls()
         logging.info('Getting the urls was successful.')
 
-        logging.info('Getting the object data.')
-        data = self.get_object_data(listing_urls)
-        logging.info('Getting the object data was successful.')
-
-        # Transform list of dicts into a single DataFrame.
-        logging.info('Processing the object data.')
-        df = pd.DataFrame(map(pd.Series, map(self.process_object_data, data)))
-        logging.info('Processing the object data was succesful, returning the DataFrame.')
+        logging.info('Getting and parsing the object data.')
+        df = self.get_object_data(listing_urls)
+        logging.info('Getting and parsing the object data was successful, returning the DataFrame.')
 
         return df
