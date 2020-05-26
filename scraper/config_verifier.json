@@ -1,0 +1,10 @@
+{
+    "types": {
+        "string": ["ObjectDescription", "ListingUrl", "RealtorName", "RealtorOrganization",
+                   "BuildingEnergyClass", "BuildingEnergyClassCategory", "BuildingCity",
+                   "BuildingNeighbourhood", "BuildingStreet", "PastatoTipas", "Šildymas", 
+                   "Įrengimas", "NamoNumeris", "ButoNumeris", "VidutiniškaiTiekKainuotųŠildymas1Mėn",
+                   "PastatoEnergijosSuvartojimoKlasė", "Įrengimas", "Šildymas",
+                   "PastatoEnergijosSuvartojimoKlasė"]
+    }
+}

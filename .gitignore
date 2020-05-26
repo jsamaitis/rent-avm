@@ -1,5 +1,6 @@
 __pycache__
 .ipynb_checkpoints
+historical_dataset_info.json
 *.csv
 *.txt
 *.log
