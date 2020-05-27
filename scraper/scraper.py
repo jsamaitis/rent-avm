@@ -503,7 +503,7 @@ class Scraper:
 
         # Optional parameter to display a progress bar.
         if self.verbose:
-            loop = tqdm.tqdm(listing_urls[:500])
+            loop = tqdm.tqdm(listing_urls)
         else:
             loop = listing_urls
 
