@@ -22,6 +22,7 @@ from fake_useragent import UserAgent
 
 import re
 import string
+import unidecode
 
 import pandas as pd
 import json
@@ -47,6 +48,7 @@ class Scraper:
         self.verbose = verbose
 
         # Setup Logging.
+        # TODO: Set this up with Google Cloud Functions. How?
         logging.basicConfig(
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(message)s",
@@ -547,6 +549,9 @@ class Scraper:
         for variable in variables_drop:
             object_data.pop(variable)
 
+        # Replace all Lithuanian characters in field names with non Lithuanian due to google cloud errors.
+        object_data = dict((unidecode.unidecode(key), value) for (key, value) in object_data.items())
+
         return object_data
 
     def get_object_data(self, listing_urls):
@@ -571,7 +576,7 @@ class Scraper:
 
         # Optional parameter to display a progress bar.
         if self.verbose:
-            loop = tqdm.tqdm(listing_urls)
+            loop = tqdm.tqdm(listing_urls[:20])
         else:
             loop = listing_urls
 
