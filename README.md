@@ -31,7 +31,7 @@ A trained ML Model should be added to an API, which is connected to a website fo
 
 [] Scraper:
  * [x] Base Scraper
- * [] Format Verifier
+ * [x] Format Verifier
  * [] Static Datasets
 
 [] Machine Learning Model:
@@ -43,4 +43,9 @@ A trained ML Model should be added to an API, which is connected to a website fo
  * [] Model API
  * [] Website
   
+[] Pipeline:
+ * [] Run scraper codes daily
+ * [] Run ML Retraining daily
+ * [] Update the website daily
+ 
   
