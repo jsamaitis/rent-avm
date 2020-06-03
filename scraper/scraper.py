@@ -11,11 +11,13 @@ Scraper wide further developments:
 
 """
 import os
+import random
 from subprocess import Popen
 
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
 from fake_useragent import UserAgent
 
 import re
@@ -49,7 +51,7 @@ class Scraper:
             level=logging.INFO,
             format="%(asctime)s [%(levelname)s] %(message)s",
             handlers=[
-                logging.FileHandler("debug.log"),
+                logging.FileHandler("scraper.log"),
                 logging.StreamHandler()
             ]
         )
@@ -58,14 +60,81 @@ class Scraper:
         with open("config_scraper.json") as f:
             self.config = json.load(f)
 
-        # Start Tor and get the session.
-        self.session = self.restart_tor()
+        # Get initial proxied session.
+        self.session = self.get_proxy_session()
         pass
+
+    def get_proxy(self):
+        """
+        TODO: This piece of shit service doesn't work. Will use a random list for now. Get a premium service api in
+         the future.
+        Gets a proxy using proxyscrape.
+
+        Current country codes used: lv, lt, pl, ee, de
+
+        Returns
+        -------
+        proxy (str): Proxy str in the format of host:port.
+        """
+
+        # TODO: Remove unused libraries.
+
+        proxy_list = [
+            "195.4.164.127:8080",
+            "37.120.192.154:8080",
+            "51.158.68.26:8811",
+            "163.172.180.18:8811"
+        ]
+
+        proxy_number = random.randint(0, len(proxy_list) - 1)
+        return proxy_list[proxy_number]
+
+    def get_proxy_session(self):
+        """
+        Creates a requests.session object using proxy ports. Automatically switches to a different proxy in case of an
+        Exception.
+
+        Returns
+        -------
+        requests.session object
+        """
+
+        correct_output = False
+        retries = 0
+        while (not correct_output) and (retries < self.max_retries):
+            try:
+                # Build a proxy session.
+                proxy = self.get_proxy()
+                session = requests.session()
+                session.proxies = {
+                    'http': proxy,
+                    'https': proxy
+                }
+
+                # Set additional Tor session parameters.
+                session.headers = UserAgent().random
+
+                # Check if the connection works.
+                output = session.get('http://httpbin.org/ip')
+
+                # If no ProxyError occurs, report number of proxies and the connected ip.
+                logging.info('Built a session at IP {}.'.format(output.json()['origin']))
+                correct_output = True
+
+            except Exception as e:
+                # Retry in the case of a failed proxy.
+                logging.warning(
+                    'Proxy at {} failed. Trying a different one.'.format(proxy))
+                logging.warning(e)
+                retries += 1
+
+        return session
 
     def get_tor_session(self):
         """
-        Creates a requests.session object using Tor socks5 proxie ports.
+        Note: Depreciated function. Requires standalone tor files / modifying to be able to use.
 
+        Creates a requests.session object using Tor socks5 proxie ports.
 
         Returns
         -------
@@ -87,13 +156,12 @@ class Scraper:
 
     def restart_tor(self):
         """
+        Note: Depreciated function. Requires standalone tor files / modifying to be able to use.
+
         Restarts Tor to generate a new IP address.
 
         A forceful hack since Tor doesn't function as intended on my windows and none of the solution work.
         Too bad! https://www.youtube.com/watch?v=k238XpMMn38
-
-        TODO: Currently works on windows only! Not even tested properly! Make this OS-proof.
-
 
         Returns
         -------
@@ -134,7 +202,7 @@ class Scraper:
         # banned. Otherwise will continue.
         correct_output = False
         retries = 0
-        while (not correct_output) or (retries < self.max_retries):
+        while (not correct_output) and (retries < self.max_retries):
             try:
                 # Scrape the main page to get the total number of pages.
                 page = self.session.get(url)
@@ -154,7 +222,7 @@ class Scraper:
                 logging.warning(e)
 
                 retries += 1
-                self.session = self.restart_tor()
+                self.session = self.get_proxy_session()
 
         error_message = 'Max retries exceeded with url {}.'.format(url)
         logging.error(error_message)
@@ -180,7 +248,7 @@ class Scraper:
 
         correct_output = False
         retries = 0
-        while (not correct_output) or (retries < self.max_retries):
+        while (not correct_output) and (retries < self.max_retries):
             try:
                 # Get page contents and put them in a "soup".
                 page = self.session.get(url)
@@ -198,7 +266,7 @@ class Scraper:
                 logging.warning(e)
 
                 retries += 1
-                self.session = self.restart_tor()
+                self.session = self.get_proxy_session()
 
         error_message = 'Max retries exceeded with url {}.'.format(url)
         logging.error(error_message)
@@ -270,9 +338,9 @@ class Scraper:
         banned = ban_check(soup)
         while banned:
             # Restart the session and the driver.
-            self.session = self.restart_tor()
+            self.session = self.get_proxy_session()
             self.driver.quit()
-            self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+            self.driver = webdriver.Chrome(ChromeDriverManager().install())
 
             # Reload the page and recheck if it's still banned.
             self.driver.get(url)
@@ -508,7 +576,7 @@ class Scraper:
             loop = listing_urls
 
         data = pd.DataFrame()
-        self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+        self.driver = webdriver.Chrome(ChromeDriverManager().install())
         for listing_url in loop:
 
             # Restarts selenium if it crashes (which happen quite often).
@@ -530,7 +598,7 @@ class Scraper:
 
                     # Restart the driver.
                     self.driver.quit()
-                    self.driver = webdriver.Chrome(os.getcwd() + self.config['file_paths']['chrome'])
+                    self.driver = webdriver.Chrome(ChromeDriverManager().install())
 
                     # Raise TimeoutError if retries >= self.max_retries.
                     retries += 1
