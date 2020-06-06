@@ -2,7 +2,6 @@ import numpy as np
 import os
 
 import json
-import logging
 
 from scipy import stats
 
@@ -23,7 +22,7 @@ class NpEncoder(json.JSONEncoder):
 
 
 class FormatVerifier:
-    def __init__(self, p_value=0.05, missing_value_deviation=0.1):
+    def __init__(self, logger, p_value=0.05, missing_value_deviation=0.1):
         """
         Class used to verify the various formats of the dataset acquired from the scraper.
 
@@ -36,18 +35,10 @@ class FormatVerifier:
 
         self.p_value = p_value
         self.missing_deviation = missing_value_deviation
-
-        # Setup Logging.
+        self.logger = logger
         # TODO: There is a weird issue with encoding which can't encode lithuanian e with a dot. Seems to cause no
         #  issues though.
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s",
-            handlers=[
-                logging.FileHandler("format_verifier.log", encoding='iso-8859-4'),
-                logging.StreamHandler()
-            ]
-        )
+
         # Load config file.
         with open('config_verifier.json', 'r', encoding='utf-8') as f:
             self.config = json.load(f)
@@ -127,9 +118,9 @@ class FormatVerifier:
                                     name not in variable_names]
 
         if len(variable_names_not_found) > 0:
-            logging.warning('Variables expected, but not found in the dataset: {}'.format(variable_names_not_found))
+            self.logger.warning('Variables expected, but not found in the dataset: {}'.format(variable_names_not_found))
         else:
-            logging.info('Found all of the expected Variables.')
+            self.logger.info('Found all of the expected Variables.')
 
         variable_names_new = [name for name in variable_names if
                               name not in self.historical_info['names']['variable_names']]
@@ -137,16 +128,16 @@ class FormatVerifier:
 
         # Report any new Variable/Value names if any were found.
         if len(variable_names_new) > 0:
-            logging.warning('Found previously unseen Variables: {}'.format(variable_names_new))
+            self.logger.warning('Found previously unseen Variables: {}'.format(variable_names_new))
             self.historical_info['names']['variable_names'].extend(variable_names_new)
         else:
-            logging.info('Found no new Variables')
+            self.logger.info('Found no new Variables')
 
         if len(value_names_new) > 0:
-            logging.warning('Found previously unseen value names: {}'.format(value_names_new))
+            self.logger.warning('Found previously unseen value names: {}'.format(value_names_new))
             self.historical_info['names']['value_names'].extend(value_names_new)
         else:
-            logging.info('Found no new Values.')
+            self.logger.info('Found no new Values.')
 
         pass
 
@@ -163,10 +154,10 @@ class FormatVerifier:
         names_strings_unexpected = [name for name in names_strings if name not in self.config['types']['string']]
 
         if len(names_strings_unexpected) > 0:
-            logging.warning(
+            self.logger.warning(
                 'Found variables are not expected to be "object" type: {}.'.format(names_strings_unexpected))
         else:
-            logging.info('Found no new "ojbect" type variables.')
+            self.logger.info('Found no new "ojbect" type variables.')
         pass
 
     def check_statistics(self, df):
@@ -202,7 +193,7 @@ class FormatVerifier:
         for variable in variables_new:
             self.historical_info['statistics'][variable] = statistics.loc[variable].to_dict()
 
-        logging.info('Saved new statistics for Variables: {}'.format(variables_new))
+        self.logger.info('Saved new statistics for Variables: {}'.format(variables_new))
 
         # Statistical tests.
         variables_failed_test = []
@@ -274,22 +265,22 @@ class FormatVerifier:
             }
 
         # Log the results.
-        logging.info('Updated statistics for all existing Variables.')
+        self.logger.info('Updated statistics for all existing Variables.')
 
         if len(variables_failed_test) > 0:
-            logging.warning(
+            self.logger.warning(
                 'Found Variables that have failed the statistical test with p-value of {0}: {1}.'.format(self.p_value,
                                                                                                          variables_failed_test))
         else:
-            logging.info(
+            self.logger.info(
                 'All variables passed the statistical tests succesfully with a p-value of {0}.'.format(self.p_value))
 
         if len(variables_failed_missing) > 0:
-            logging.warning(
+            self.logger.warning(
                 'Found Variables that have failed the missing value check with missing value percentage deviation of {0}: {1}.'.format(
                     self.missing_deviation, variables_failed_missing))
         else:
-            logging.info(
+            self.logger.info(
                 'All variables passed the missing value check with missing value percentage deviation of {0}.'.format(
                     self.missing_deviation))
 
@@ -297,7 +288,7 @@ class FormatVerifier:
         with open('historical_dataset_info.json', 'w') as f:
             json.dump(self.historical_info, f, cls=NpEncoder)
 
-        logging.info('Succesfully updated historical_dataset_info.json file.')
+        self.logger.info('Succesfully updated historical_dataset_info.json file.')
         pass
 
     def verify(self, df):
@@ -314,10 +305,10 @@ class FormatVerifier:
         df (pandas.DataFrame): consists of data to be checked.
         """
 
-        logging.info('Executing data checks.')
+        self.logger.info('Executing data checks.')
         self.check_names(df)
         self.check_types(df)
         self.check_statistics(df)
-        logging.info('Successfully executed all the data checks.')
+        self.logger.info('Successfully executed all the data checks.')
 
         pass

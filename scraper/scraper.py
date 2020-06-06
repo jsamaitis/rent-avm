@@ -4,10 +4,9 @@ Scraper wide further developments:
     houses. Selenium is really slow (5-10s / it), but it is necessary to load neighbourhood statistics from the page
     using JS.
 
-    * TODO: Create a format verifier that reports any new fields as well as fields that were missing when they
-    shouldn't, as well as any additional field format checks (ints should be ints, cats should be cats, etc.).
-
     * TODO: Add date of scraping as a variable.
+
+    * TODO: Optimize for memory usage to be able to use smaller instances.
 
 """
 import os
@@ -28,12 +27,11 @@ import pandas as pd
 import json
 
 import time
-import logging
 import tqdm
 
 
 class Scraper:
-    def __init__(self, max_retries=3, verbose=True):
+    def __init__(self, logger, max_retries=3, verbose=True):
         """
         Class that scrapes the given website. Use the scraping method is Scraper().scrape.
 
@@ -46,17 +44,7 @@ class Scraper:
         # Initialize class variables.
         self.max_retries = max_retries
         self.verbose = verbose
-
-        # Setup Logging.
-        # TODO: Set this up with Google Cloud Functions. How?
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s [%(levelname)s] %(message)s",
-            handlers=[
-                logging.FileHandler("scraper.log"),
-                logging.StreamHandler()
-            ]
-        )
+        self.logger = logger
 
         # Load the config files.
         with open("config_scraper.json") as f:
@@ -83,8 +71,6 @@ class Scraper:
 
         proxy_list = [
             "195.4.164.127:8080",
-            "37.120.192.154:8080",
-            "51.158.68.26:8811",
             "163.172.180.18:8811"
         ]
 
@@ -120,14 +106,14 @@ class Scraper:
                 output = session.get('http://httpbin.org/ip')
 
                 # If no ProxyError occurs, report number of proxies and the connected ip.
-                logging.info('Built a session at IP {}.'.format(output.json()['origin']))
+                self.logger.info('Built a session at IP {}.'.format(output.json()['origin']))
                 correct_output = True
 
             except Exception as e:
                 # Retry in the case of a failed proxy.
-                logging.warning(
+                self.logger.warning(
                     'Proxy at {} failed. Trying a different one.'.format(proxy))
-                logging.warning(e)
+                self.logger.warning(e)
                 retries += 1
 
         return session
@@ -153,7 +139,7 @@ class Scraper:
         # Set additional Tor session parameters.
         session.headers = UserAgent().random
 
-        logging.info('Built a Tor session at IP {}.'.format(session.get('http://httpbin.org/ip').json()['origin']))
+        self.logger.info('Built a Tor session at IP {}.'.format(session.get('http://httpbin.org/ip').json()['origin']))
         return session
 
     def restart_tor(self):
@@ -220,14 +206,14 @@ class Scraper:
                 return total_pages
 
             except Exception as e:
-                logging.warning('Exception occurred at get_number_of_pages:')
-                logging.warning(e)
+                self.logger.warning('Exception occurred at get_number_of_pages:')
+                self.logger.warning(e)
 
                 retries += 1
                 self.session = self.get_proxy_session()
 
         error_message = 'Max retries exceeded with url {}.'.format(url)
-        logging.error(error_message)
+        self.logger.error(error_message)
         raise TimeoutError(error_message)
 
     def get_page_urls(self, url):
@@ -264,14 +250,14 @@ class Scraper:
                 return listings_urls
 
             except Exception as e:
-                logging.warning('Exception occurred at get_page_urls:')
-                logging.warning(e)
+                self.logger.warning('Exception occurred at get_page_urls:')
+                self.logger.warning(e)
 
                 retries += 1
                 self.session = self.get_proxy_session()
 
         error_message = 'Max retries exceeded with url {}.'.format(url)
-        logging.error(error_message)
+        self.logger.error(error_message)
         raise TimeoutError(error_message)
 
     def get_urls(self):
@@ -331,7 +317,7 @@ class Scraper:
             ban = False
             # Logs the ban.
             if ban:
-                logging.warning('Banned with existing Tor connection.')
+                self.logger.warning('Banned with existing Tor connection.')
 
             return False
 
@@ -354,7 +340,7 @@ class Scraper:
             retries += 1
             if retries >= self.max_retries:
                 error_message = 'Max retries exceeded with url {}.'.format(url)
-                logging.error(error_message)
+                self.logger.error(error_message)
                 raise TimeoutError(error_message)
 
         # Find all name and item classes within object details class. Multiple tag values in config are necessary
@@ -363,7 +349,7 @@ class Scraper:
 
         # These either contain dead urls or scraper honeypot urls that might potentially cause bans on visit.
         if object_details_class is None:
-            logging.info('Found a dead / scraper catcher url. {}'.format(url))
+            self.logger.info('Found a dead / scraper catcher url. {}'.format(url))
             return None
 
         object_names = object_details_class.find_all(self.config['html_tags']['object_details_names'])
@@ -598,8 +584,8 @@ class Scraper:
                     continue
 
                 except Exception as e:
-                    logging.warning('Exception occurred at parse_object_data:')
-                    logging.warning(e)
+                    self.logger.warning('Exception occurred at parse_object_data:')
+                    self.logger.warning(e)
 
                     # Restart the driver.
                     self.driver.quit()
@@ -609,7 +595,7 @@ class Scraper:
                     retries += 1
                     if retries >= self.max_retries:
                         error_message = 'Max retries exceeded with url {}.'.format(listing_url)
-                        logging.error(error_message)
+                        self.logger.error(error_message)
                         raise TimeoutError(error_message)
 
         self.driver.quit()
@@ -629,12 +615,12 @@ class Scraper:
         the website.
         """
 
-        logging.info('Getting the urls.')
+        self.logger.info('Getting the urls.')
         listing_urls = self.get_urls()
-        logging.info('Getting the urls was successful.')
+        self.logger.info('Getting the urls was successful.')
 
-        logging.info('Getting and parsing the object data.')
+        self.logger.info('Getting and parsing the object data.')
         df = self.get_object_data(listing_urls)
-        logging.info('Getting and parsing the object data was successful, returning the DataFrame.')
+        self.logger.info('Getting and parsing the object data was successful, returning the DataFrame.')
 
         return df
