@@ -4,5 +4,4 @@ historical_dataset_info.json
 gcp_rent_avm
 gcp_rent_avm.pub
 *.csv
-*.txt
 *.log

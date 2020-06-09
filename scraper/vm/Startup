@@ -1,0 +1,12 @@
+apt-get update && apt-get install \
+	python3-pip
+	zip \
+	unzip
+
+git clone https://github.com/jsamaitis/rent-avm.git
+cd rent-avm/scraper/vm
+
+# Install chromedriver.
+wget https://chromedriver.storage.googleapis.com/84.0.4147.30/chromedriver_linux64.zip
+unzip *.zip
+rm *.zip

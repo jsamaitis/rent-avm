@@ -1,0 +1,13 @@
+flask
+google-cloud-logging
+google-cloud-bigquery
+
+beautifulsoup4
+selenium
+fake_useragent
+pandas
+pandas_gbq
+scipy
+
+tqdm
+unidecode
