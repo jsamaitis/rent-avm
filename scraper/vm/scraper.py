@@ -8,6 +8,8 @@ Scraper wide further developments:
 
     * TODO: Optimize for memory usage to be able to use smaller instances.
 
+    * TODO: Run this on the start of the "scraper" VM. Docker maybe?
+
 """
 import os
 import random
@@ -16,7 +18,6 @@ from subprocess import Popen
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
-from webdriver_manager.chrome import ChromeDriverManager
 from fake_useragent import UserAgent
 
 import re
@@ -47,8 +48,13 @@ class Scraper:
         self.logger = logger
 
         # Load the config files.
-        with open("config_scraper.json") as f:
+        with open("config/config_scraper.json") as f:
             self.config = json.load(f)
+
+        # Set chrome options to be able to run in docker.
+        self.chrome_options = webdriver.ChromeOptions()
+        self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument('--no-sandbox')
 
         # Get initial proxied session.
         self.session = self.get_proxy_session()
@@ -67,11 +73,10 @@ class Scraper:
         proxy (str): Proxy str in the format of host:port.
         """
 
-        # TODO: Remove unused libraries.
-
         proxy_list = [
-            "195.4.164.127:8080",
-            "163.172.180.18:8811"
+            "163.172.180.18:8811",
+            "37.123.164.8:8888",
+            "94.245.105.90:80"
         ]
 
         proxy_number = random.randint(0, len(proxy_list) - 1)
@@ -86,6 +91,7 @@ class Scraper:
         -------
         requests.session object
         """
+        # TODO: Get proxied session.
 
         correct_output = False
         retries = 0
@@ -94,10 +100,10 @@ class Scraper:
                 # Build a proxy session.
                 proxy = self.get_proxy()
                 session = requests.session()
-                session.proxies = {
-                    'http': proxy,
-                    'https': proxy
-                }
+                # session.proxies = {
+                #     'http': proxy,
+                #     'https': proxy
+                # }
 
                 # Set additional Tor session parameters.
                 session.headers = UserAgent().random
@@ -328,7 +334,7 @@ class Scraper:
             # Restart the session and the driver.
             self.session = self.get_proxy_session()
             self.driver.quit()
-            self.driver = webdriver.Chrome(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(executable_path='/chromedriver', chrome_options=self.chrome_options)
 
             # Reload the page and recheck if it's still banned.
             self.driver.get(url)
@@ -567,7 +573,7 @@ class Scraper:
             loop = listing_urls
 
         data = pd.DataFrame()
-        self.driver = webdriver.Chrome(ChromeDriverManager().install())
+        self.driver = webdriver.Chrome(executable_path='/chromedriver', chrome_options=self.chrome_options)
         for listing_url in loop:
 
             # Restarts selenium if it crashes (which happen quite often).
@@ -589,7 +595,7 @@ class Scraper:
 
                     # Restart the driver.
                     self.driver.quit()
-                    self.driver = webdriver.Chrome(ChromeDriverManager().install())
+                    self.driver = webdriver.Chrome(executable_path='/chromedriver', chrome_options=self.chrome_options)
 
                     # Raise TimeoutError if retries >= self.max_retries.
                     retries += 1

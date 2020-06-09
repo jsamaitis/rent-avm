@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 import os
 
 import json
@@ -40,14 +41,28 @@ class FormatVerifier:
         #  issues though.
 
         # Load config file.
-        with open('config_verifier.json', 'r', encoding='utf-8') as f:
+        with open('config/config_verifier.json', 'r', encoding='utf-8') as f:
             self.config = json.load(f)
 
-        # Load, if historical_dataset_info file exists.
-        if os.path.exists('historical_dataset_info.json'):
-            with open('historical_dataset_info.json', 'r', encoding='utf-8') as f:
-                self.historical_info = json.load(f)
-        else:
+        # Load, if data_info tables exist.
+        from pandas_gbq.gbq import GenericGBQException
+
+        try:
+            # Load the data from GoogleBigQuery and store into a dict.
+            variable_names = list(pd.read_gbq("select * from data_info.variable_names", project_id='rent-avm')[
+                'VariableNames'].values)
+            value_names = list(pd.read_gbq("select * from data_info.value_names", project_id='rent-avm')['ValueNames'].values)
+            statistics = pd.read_gbq("select * from data_info.statistics", project_id='rent-avm').set_index(
+                'Name').T.to_dict()
+
+            self.historical_info = {
+                'names': {
+                    'variable_names': variable_names,
+                    'value_names': value_names
+                },
+                'statistics': statistics
+            }
+        except GenericGBQException:
             self.historical_info = {
                 'names': {
                     'variable_names': [],
@@ -284,11 +299,18 @@ class FormatVerifier:
                 'All variables passed the missing value check with missing value percentage deviation of {0}.'.format(
                     self.missing_deviation))
 
-        # Saving the updated historical info into a file.
-        with open('historical_dataset_info.json', 'w') as f:
-            json.dump(self.historical_info, f, cls=NpEncoder)
+        # Split variables into representative tables and upload to GoogleBigQuery.
+        gbq_variable_names = pd.DataFrame(self.historical_info['names']['variable_names'], columns=['VariableNames'])
+        gbq_value_names = pd.DataFrame(self.historical_info['names']['value_names'], columns=['ValueNames'])
+        gbq_statistics = pd.DataFrame(self.historical_info['statistics']).T.reset_index().rename(columns={'index': 'Name'})
 
-        self.logger.info('Succesfully updated historical_dataset_info.json file.')
+        gbq_variable_names.to_gbq('data_info.variable_names', project_id='rent-avm', if_exists='replace',
+                                  progress_bar=False)
+        gbq_value_names.to_gbq('data_info.value_names', project_id='rent-avm', if_exists='replace', progress_bar=False)
+        gbq_statistics.to_gbq('data_info.statistics', project_id='rent-avm', if_exists='replace', progress_bar=False)
+
+
+        self.logger.info('Succesfully updated historical info and uploaded to GoogleBigQuery.')
         pass
 
     def verify(self, df):
