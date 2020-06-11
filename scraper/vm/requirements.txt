@@ -3,7 +3,9 @@ google-cloud-logging
 google-cloud-bigquery
 
 beautifulsoup4
+lxml
 selenium
+webdriver_manager
 fake_useragent
 pandas
 pandas_gbq

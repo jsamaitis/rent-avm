@@ -18,6 +18,7 @@ from subprocess import Popen
 import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
+from webdriver_manager.chrome import ChromeDriverManager
 from fake_useragent import UserAgent
 
 import re
@@ -53,8 +54,10 @@ class Scraper:
 
         # Set chrome options to be able to run in docker.
         self.chrome_options = webdriver.ChromeOptions()
-        self.chrome_options.add_argument('--headless')
         self.chrome_options.add_argument('--no-sandbox')
+        self.chrome_options.add_argument('--window-size=1420,1080')
+        self.chrome_options.add_argument('--headless')
+        self.chrome_options.add_argument('--disable-gpu')
 
         # Get initial proxied session.
         self.session = self.get_proxy_session()
@@ -100,10 +103,10 @@ class Scraper:
                 # Build a proxy session.
                 proxy = self.get_proxy()
                 session = requests.session()
-                # session.proxies = {
-                #     'http': proxy,
-                #     'https': proxy
-                # }
+                session.proxies = {
+                    'http': proxy,
+                    'https': proxy
+                }
 
                 # Set additional Tor session parameters.
                 session.headers = UserAgent().random
@@ -334,7 +337,7 @@ class Scraper:
             # Restart the session and the driver.
             self.session = self.get_proxy_session()
             self.driver.quit()
-            self.driver = webdriver.Chrome(executable_path='/chromedriver', chrome_options=self.chrome_options)
+            self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)
 
             # Reload the page and recheck if it's still banned.
             self.driver.get(url)
@@ -568,12 +571,12 @@ class Scraper:
 
         # Optional parameter to display a progress bar.
         if self.verbose:
-            loop = tqdm.tqdm(listing_urls[:20])
+            loop = tqdm.tqdm(listing_urls[:20])  # TODO: TEMPORARY FOR TESTING.
         else:
             loop = listing_urls
 
         data = pd.DataFrame()
-        self.driver = webdriver.Chrome(executable_path='/chromedriver', chrome_options=self.chrome_options)
+        self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)
         for listing_url in loop:
 
             # Restarts selenium if it crashes (which happen quite often).
@@ -595,7 +598,7 @@ class Scraper:
 
                     # Restart the driver.
                     self.driver.quit()
-                    self.driver = webdriver.Chrome(executable_path='/chromedriver', chrome_options=self.chrome_options)
+                    self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)
 
                     # Raise TimeoutError if retries >= self.max_retries.
                     retries += 1

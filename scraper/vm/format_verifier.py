@@ -190,6 +190,7 @@ class FormatVerifier:
         """
 
         # Get current batch statistics, add missing value percentage as well as number of samples.
+        # TODO: Error - sometimes select_dtypes object can make the df empty, thus crashing everything.
         statistics = df.select_dtypes(exclude='object').describe().T
         statistics = statistics[['mean', 'std', 'min', 'max']]
         statistics['missing'] = df.isna().mean()

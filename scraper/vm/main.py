@@ -5,7 +5,6 @@ import datetime
 import logging
 import google.cloud.logging
 
-
 # Setup Logging.
 client = google.cloud.logging.Client()
 client.get_default_handler()
