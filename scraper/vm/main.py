@@ -25,6 +25,7 @@ def scrape():
     verifier.verify(df)
     return 'Successfully Scraped.'
 
+# TODO: Add shut down instance method.
 
 if __name__ == '__main__':
     scrape()

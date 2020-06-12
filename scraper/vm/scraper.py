@@ -71,14 +71,13 @@ class Scraper:
         proxy (str): Proxy str in the format of host:port.
         """
 
-        # proxy_list = [
-        #         #     "163.172.180.18:8811",
-        #         #     "37.120.192.154:8080"
-        #         # ]
-        #         #
-        #         # proxy_number = random.randint(0, len(proxy_list) - 1)
-        #         # return proxy_list[proxy_number]
-        return requests.get('http://pubproxy.com/api/proxy').json()['data'][0]['ipPort']
+        proxy_list = [
+                    "163.172.180.18:8811",
+                    "37.120.192.154:8080"
+                ]
+
+        proxy_number = random.randint(0, len(proxy_list) - 1)
+        return proxy_list[proxy_number]
 
     def get_proxy_handler(self, handler_type):
         """
@@ -143,7 +142,6 @@ class Scraper:
                     # Check if the connection works.
                     driver.get('http://httpbin.org/ip')
                     external_ip = json.loads(driver.find_element_by_tag_name("body").text)['origin']
-                    driver.close()
 
                     handler = driver
                 else:
@@ -358,10 +356,12 @@ class Scraper:
 
         # TODO: Add ban check using the soup here, once you get banned. This might not ever happen, because monkeys.
         def ban_check(page_soup):
-            ban = False
+            # Check if soup has this specific id, prompting for Captcha.
+            ban = soup.find(id=self.config['html_tags']['banned']) is not None
+
             # Logs the ban.
             if ban:
-                self.logger.warning('Banned with existing Tor connection.')
+                self.logger.warning('Banned with existing connection.')
 
             return False
 
@@ -389,8 +389,7 @@ class Scraper:
         # Find all name and item classes within object details class. Multiple tag values in config are necessary
         # because this website was built by monkeys.
         object_details_class = soup.find(class_=self.config['html_tags']['object_details'])
-        self.logger.info(soup.text) # TODO: REMOVE, TESTING ONLY. USE THIS FOR BAN CHECKING.
-        # TODO: All of these fail on GC. Fails because it wants to verify. Proxies not working?
+
         # These either contain dead urls or scraper honeypot urls that might potentially cause bans on visit.
         if object_details_class is None:
             self.logger.info('Found a dead / scraper catcher url. {}'.format(url))
@@ -633,7 +632,7 @@ class Scraper:
 
                     # Restart the driver.
                     self.driver.quit()
-                    self.driver = self.get_proxy_handler(handler_type='requests')
+                    self.driver = self.get_proxy_handler(handler_type='selenium')
 
                     # Raise TimeoutError if retries >= self.max_retries.
                     retries += 1

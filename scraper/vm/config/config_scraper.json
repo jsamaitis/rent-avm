@@ -20,7 +20,9 @@
     "neighbourhood_statistics_items": "cell-data",
 
     "realtor_name": "contacts-title",
-    "realtor_organization": "long-link-wrapper"
+    "realtor_organization": "long-link-wrapper",
+
+    "banned": "validation-form"
   },
 
   "urls":{
