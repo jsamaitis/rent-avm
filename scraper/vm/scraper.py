@@ -19,6 +19,7 @@ import requests
 from bs4 import BeautifulSoup
 from selenium import webdriver
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.proxy import Proxy, ProxyType
 from fake_useragent import UserAgent
 
 import re
@@ -52,21 +53,15 @@ class Scraper:
         with open("config/config_scraper.json") as f:
             self.config = json.load(f)
 
-        # Set chrome options to be able to run in docker.
-        self.chrome_options = webdriver.ChromeOptions()
-        self.chrome_options.add_argument('--no-sandbox')
-        self.chrome_options.add_argument('--window-size=1420,1080')
-        self.chrome_options.add_argument('--headless')
-        self.chrome_options.add_argument('--disable-gpu')
-
         # Get initial proxied session.
-        self.session = self.get_proxy_session()
+        self.session = self.get_proxy_handler(handler_type='requests')
         pass
 
     def get_proxy(self):
         """
         TODO: This piece of shit service doesn't work. Will use a random list for now. Get a premium service api in
          the future.
+        TODO: Try this http://pubproxy.com/api/proxy
         Gets a proxy using proxyscrape.
 
         Current country codes used: lv, lt, pl, ee, de
@@ -76,17 +71,18 @@ class Scraper:
         proxy (str): Proxy str in the format of host:port.
         """
 
-        proxy_list = [
-            "163.172.180.18:8811",
-            "37.123.164.8:8888",
-            "94.245.105.90:80"
-        ]
+        # proxy_list = [
+        #         #     "163.172.180.18:8811",
+        #         #     "37.120.192.154:8080"
+        #         # ]
+        #         #
+        #         # proxy_number = random.randint(0, len(proxy_list) - 1)
+        #         # return proxy_list[proxy_number]
+        return requests.get('http://pubproxy.com/api/proxy').json()['data'][0]['ipPort']
 
-        proxy_number = random.randint(0, len(proxy_list) - 1)
-        return proxy_list[proxy_number]
-
-    def get_proxy_session(self):
+    def get_proxy_handler(self, handler_type):
         """
+        TODO: Update with selenium as well.
         Creates a requests.session object using proxy ports. Automatically switches to a different proxy in case of an
         Exception.
 
@@ -94,7 +90,6 @@ class Scraper:
         -------
         requests.session object
         """
-        # TODO: Get proxied session.
 
         correct_output = False
         retries = 0
@@ -102,20 +97,60 @@ class Scraper:
             try:
                 # Build a proxy session.
                 proxy = self.get_proxy()
-                session = requests.session()
-                session.proxies = {
-                    'http': proxy,
-                    'https': proxy
-                }
 
-                # Set additional Tor session parameters.
-                session.headers = UserAgent().random
+                if handler_type == 'requests':
+                    session = requests.session()
+                    session.proxies = {
+                        'http': proxy,
+                        'https': proxy
+                    }
 
-                # Check if the connection works.
-                output = session.get('http://httpbin.org/ip')
+                    # Set additional session parameters.
+                    session.headers = UserAgent().random
+
+                    # Check if the connection works.
+                    output = session.get('http://httpbin.org/ip')
+                    external_ip = output.json()['origin']
+
+                    handler = session
+
+                elif handler_type == 'selenium':
+                    # Set chrome options to be able to run in docker.
+                    chrome_options = webdriver.ChromeOptions()
+                    chrome_options.add_argument('--no-sandbox')
+                    chrome_options.add_argument('--window-size=1420,1080')
+                    chrome_options.add_argument('--headless')
+                    chrome_options.add_argument('--disable-gpu')
+
+                    # Set a fake user agent.
+                    chrome_options.add_argument('user-agent={}'.format(UserAgent().random))
+
+                    # Initialize a proxy.
+                    proxy = self.get_proxy()
+
+                    proxy_selenium = Proxy()
+                    proxy_selenium.proxy_type = ProxyType.MANUAL
+                    proxy_selenium.http_proxy = proxy
+                    proxy_selenium.ssl_proxy = proxy
+
+                    capabilities = webdriver.DesiredCapabilities.CHROME
+                    proxy_selenium.add_to_capabilities(capabilities)
+
+                    driver = webdriver.Chrome(ChromeDriverManager().install(),
+                                              desired_capabilities=capabilities,
+                                              chrome_options=chrome_options)
+
+                    # Check if the connection works.
+                    driver.get('http://httpbin.org/ip')
+                    external_ip = json.loads(driver.find_element_by_tag_name("body").text)['origin']
+                    driver.close()
+
+                    handler = driver
+                else:
+                    raise NotImplementedError('Handler type must be one of ["requests", "selenium"].')
 
                 # If no ProxyError occurs, report number of proxies and the connected ip.
-                self.logger.info('Built a session at IP {}.'.format(output.json()['origin']))
+                self.logger.info('Built a session at IP {}.'.format(external_ip))
                 correct_output = True
 
             except Exception as e:
@@ -125,7 +160,7 @@ class Scraper:
                 self.logger.warning(e)
                 retries += 1
 
-        return session
+        return handler
 
     def get_tor_session(self):
         """
@@ -219,7 +254,7 @@ class Scraper:
                 self.logger.warning(e)
 
                 retries += 1
-                self.session = self.get_proxy_session()
+                self.session = self.get_proxy_handler(handler_type='requests')
 
         error_message = 'Max retries exceeded with url {}.'.format(url)
         self.logger.error(error_message)
@@ -263,7 +298,7 @@ class Scraper:
                 self.logger.warning(e)
 
                 retries += 1
-                self.session = self.get_proxy_session()
+                self.session = self.get_proxy_handler(handler_type='requests')
 
         error_message = 'Max retries exceeded with url {}.'.format(url)
         self.logger.error(error_message)
@@ -335,9 +370,8 @@ class Scraper:
         banned = ban_check(soup)
         while banned:
             # Restart the session and the driver.
-            self.session = self.get_proxy_session()
             self.driver.quit()
-            self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)
+            self.driver = self.get_proxy_handler(handler_type='selenium')
 
             # Reload the page and recheck if it's still banned.
             self.driver.get(url)
@@ -355,7 +389,8 @@ class Scraper:
         # Find all name and item classes within object details class. Multiple tag values in config are necessary
         # because this website was built by monkeys.
         object_details_class = soup.find(class_=self.config['html_tags']['object_details'])
-
+        self.logger.info(soup.text) # TODO: REMOVE, TESTING ONLY. USE THIS FOR BAN CHECKING.
+        # TODO: All of these fail on GC. Fails because it wants to verify. Proxies not working?
         # These either contain dead urls or scraper honeypot urls that might potentially cause bans on visit.
         if object_details_class is None:
             self.logger.info('Found a dead / scraper catcher url. {}'.format(url))
@@ -576,7 +611,7 @@ class Scraper:
             loop = listing_urls
 
         data = pd.DataFrame()
-        self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)
+        self.driver = self.get_proxy_handler(handler_type='selenium')
         for listing_url in loop:
 
             # Restarts selenium if it crashes (which happen quite often).
@@ -598,7 +633,7 @@ class Scraper:
 
                     # Restart the driver.
                     self.driver.quit()
-                    self.driver = webdriver.Chrome(ChromeDriverManager().install(), chrome_options=self.chrome_options)
+                    self.driver = self.get_proxy_handler(handler_type='requests')
 
                     # Raise TimeoutError if retries >= self.max_retries.
                     retries += 1
