@@ -1,18 +1,12 @@
 """
-Scraper wide further developments:
-    * TODO: Use Selenium to scrape only previously unseen houses (based on new urls?), use standard requests for other
-    houses. Selenium is really slow (5-10s / it), but it is necessary to load neighbourhood statistics from the page
-    using JS.
-
-    * TODO: Add date of scraping as a variable.
-
-    * TODO: Optimize for memory usage to be able to use smaller instances.
-
-    * TODO: Run this on the start of the "scraper" VM. Docker maybe?
+Scraper further developments:
+    * TODO: Optimize for memory usage to be able to use smaller instances. This requires GoogleBigQuery to
+       automatically add new variables while appending rows somehow, like pandas does. Otherwise, since each object
+       MIGHT have previously unseen variables, a dynamic column creation of pandas dataframes is used, limiting the
+       ability of the code to append rows after each object, instead of storing them into memory.
 
 """
 import os
-import random
 from subprocess import Popen
 
 import requests
@@ -29,7 +23,7 @@ import unidecode
 import pandas as pd
 import json
 
-import time
+import datetime
 import tqdm
 
 
@@ -50,53 +44,49 @@ class Scraper:
         self.logger = logger
 
         # Load the config files.
+        # TODO: Move this somewhere else in order to be able to edit without having to recreate the docker image each
+        #  time. Where?
         with open("config/config_scraper.json") as f:
             self.config = json.load(f)
 
-        # Get initial proxied session.
+        # Get initial proxy session.
         self.session = self.get_proxy_handler(handler_type='requests')
         pass
 
     def get_proxy(self):
         """
-        TODO: This piece of shit service doesn't work. Will use a random list for now. Get a premium service api in
-         the future.
-        TODO: Try this http://pubproxy.com/api/proxy
-        Gets a proxy using proxyscrape.
-
-        Current country codes used: lv, lt, pl, ee, de
+        Gets a proxy using a proxy service API.
 
         Returns
         -------
         proxy (str): Proxy str in the format of host:port.
         """
-
-        proxy_list = [
-                    "163.172.180.18:8811",
-                    "37.120.192.154:8080"
-                ]
-
-        proxy_number = random.randint(0, len(proxy_list) - 1)
-        return proxy_list[proxy_number]
+        # TODO: Make this robust - currently it's very very bad.
+        # YES YES, FREE PROXIES, WELL I DON'T HAVE $1000000000000 TO SPEND ON SOMETHING THAT I CAN GET FOR FREE.
+        try:
+            return requests.get("http://pubproxy.com/api/proxy").json()['data'][0]['ipPort']  # 50 proxies per day.
+        except:
+            return '82.135.148.201:8081'  # Random "working" proxy at a time. Hopefully the one above works! :)
 
     def get_proxy_handler(self, handler_type):
         """
-        TODO: Update with selenium as well.
-        Creates a requests.session object using proxy ports. Automatically switches to a different proxy in case of an
-        Exception.
+        Creates a proxy handler object - either a requests.session or selenium.webdriver, based on input.
+
+        Parameters
+        ----------
+        handler_type (str): A handler to return - ["requests", "selenium"].
 
         Returns
         -------
-        requests.session object
+        handler (requests.session, selenium.webdriver)
         """
+        # Initialize a proxy.
+        proxy = self.get_proxy()
 
         correct_output = False
         retries = 0
         while (not correct_output) and (retries < self.max_retries):
             try:
-                # Build a proxy session.
-                proxy = self.get_proxy()
-
                 if handler_type == 'requests':
                     session = requests.session()
                     session.proxies = {
@@ -111,7 +101,11 @@ class Scraper:
                     output = session.get('http://httpbin.org/ip')
                     external_ip = output.json()['origin']
 
-                    handler = session
+                    # If no ProxyError occurs, report number of proxies and the connected ip.
+                    self.logger.info('Built a session at IP {}.'.format(external_ip))
+                    correct_output = True
+
+                    return session
 
                 elif handler_type == 'selenium':
                     # Set chrome options to be able to run in docker.
@@ -123,9 +117,6 @@ class Scraper:
 
                     # Set a fake user agent.
                     chrome_options.add_argument('user-agent={}'.format(UserAgent().random))
-
-                    # Initialize a proxy.
-                    proxy = self.get_proxy()
 
                     proxy_selenium = Proxy()
                     proxy_selenium.proxy_type = ProxyType.MANUAL
@@ -143,13 +134,13 @@ class Scraper:
                     driver.get('http://httpbin.org/ip')
                     external_ip = json.loads(driver.find_element_by_tag_name("body").text)['origin']
 
-                    handler = driver
+                    # If no ProxyError occurs, report number of proxies and the connected ip.
+                    self.logger.info('Built a session at IP {}.'.format(external_ip))
+                    correct_output = True
+
+                    return driver
                 else:
                     raise NotImplementedError('Handler type must be one of ["requests", "selenium"].')
-
-                # If no ProxyError occurs, report number of proxies and the connected ip.
-                self.logger.info('Built a session at IP {}.'.format(external_ip))
-                correct_output = True
 
             except Exception as e:
                 # Retry in the case of a failed proxy.
@@ -158,7 +149,9 @@ class Scraper:
                 self.logger.warning(e)
                 retries += 1
 
-        return handler
+        error_message = 'Max retries exceeded while trying to get proxies.'
+        self.logger.error(error_message)
+        raise TimeoutError(error_message)
 
     def get_tor_session(self):
         """
@@ -205,7 +198,6 @@ class Scraper:
         tor_path = os.getcwd() + self.config['file_paths']['tor']
         Popen(tor_path, shell=True)
 
-        time.sleep(1)
         return self.get_tor_session()
 
     def get_number_of_pages(self, url):
@@ -354,21 +346,18 @@ class Scraper:
 
         soup = BeautifulSoup(page_source, 'lxml')
 
-        # TODO: Add ban check using the soup here, once you get banned. This might not ever happen, because monkeys.
         def ban_check(page_soup):
             # Check if soup has this specific id, prompting for Captcha.
             ban = soup.find(id=self.config['html_tags']['banned']) is not None
-
-            # Logs the ban.
-            if ban:
-                self.logger.warning('Banned with existing connection.')
-
-            return False
+            return ban
 
         # If the driver got banned, resets everything and reloads the page until it works or self.max_retries exceeded.
         retries = 0
         banned = ban_check(soup)
         while banned:
+            # Logs the ban.
+            self.logger.warning('Banned with existing connection. Restarting.')
+
             # Restart the session and the driver.
             self.driver.quit()
             self.driver = self.get_proxy_handler(handler_type='selenium')
@@ -447,14 +436,15 @@ class Scraper:
 
         # Lots of specific exceptions due to monkey code. Don't try to uderstand and, not, etc. statemets.
         # It works as intended and you should be happy about it.
-        if (realtor_name is not None) and (len(realtor_name) != 0) and (not ('Pardavėjo kontaktai' in realtor_name.contents[0]) and not ('Nuomotojo kontaktai' in realtor_name.contents[0])):
+        if (realtor_name is not None) and (len(realtor_name) != 0) and (
+                not ('Pardavėjo kontaktai' in realtor_name.contents[0]) and not (
+                'Nuomotojo kontaktai' in realtor_name.contents[0])):
             object_data['Realtor Name'] = realtor_name.contents[0]
             object_data['Realtor'] = 1
 
         if realtor_organization is not None:
             object_data['Realtor Organization'] = realtor_organization.contents[1]['href']
 
-        # TODO: When re-scraping  the data without selenium, this part becomes optional.
         # Find all name and item classes withing object details class.
         neighbourhood_statistics = soup.find(id=self.config['html_tags']['neighbourhood_statistics'])
 
@@ -470,7 +460,6 @@ class Scraper:
         for name, item in zip(neighbourhood_statistics_names, neighbourhood_statistics_items):
             object_data[name] = item
 
-        # TODO: When re-scraping  the data without selenium, this part becomes optional.
         # Get energy class rating.
         building_energy_class = soup.find(class_=self.config['html_tags']['building_energy_class'])
 
@@ -481,6 +470,9 @@ class Scraper:
             object_data['Building Energy Class'] = None
             object_data['Building Energy Class Category'] = None
 
+        # Add DateScraped as a variable.
+        object_data['DateScraped'] = datetime.datetime.today().date().strftime('%Y_%m_%d')
+
         return object_data
 
     def process_object_data(self, data):
@@ -489,8 +481,6 @@ class Scraper:
 
         Sets the correct formats, processes strings into readable formats, creates categorical and pseudo-categorical
         variables.
-
-        TODO: Fix all the bugs, make most of the parameters optional.
 
 
         Parameters
@@ -502,6 +492,7 @@ class Scraper:
         object_data (dict): Processed dictionary.
         """
 
+        # TODO: This should be in config files rather than withing the code.
         variables_integer = ['Plotas', 'KainaMėn', 'KambariųSk', 'Aukštas', 'AukštųSk', 'Metai', 'ArtimiausiasDarželis',
                              'ArtimiausiaMokymoĮstaiga', 'ArtimiausiaParduotuvė', 'ViešojoTransportoStotelė',
                              'Nusikaltimai500MSpinduliuPraėjusįMėnesį']
@@ -573,7 +564,7 @@ class Scraper:
             heating = re.findall('\d+,\d+', heating)[0]
             object_data['VidutiniškaiTiekKainuotųŠildymas1Mėn'] = float(heating.replace(',', '.'))
 
-            # Drop no longer required variables.
+        # Drop no longer required variables.
         variables_drop.extend(['ListingName'])
         for variable in variables_drop:
             object_data.pop(variable)
@@ -650,11 +641,10 @@ class Scraper:
 
         Uses the config_scraper.json configuration to scrape the given website.
 
-        TODO: Object description might have ,'s and "'s, which make saving to csv dangerous. Figure out how to fix it.
 
         Returns
         -------
-        pandas.DataFrame: Data containing all of the processed-raw (none of the information removed) lissting data from
+        pandas.DataFrame: Data containing all of the processed-raw (none of the information removed) listing data from
         the website.
         """
 

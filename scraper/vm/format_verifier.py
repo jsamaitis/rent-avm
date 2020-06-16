@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import os
 
 import json
 
@@ -9,7 +8,7 @@ from scipy import stats
 
 class NpEncoder(json.JSONEncoder):
     """
-    Class stolen from stack overflow to handle Lithuanian encodings for the json library.
+    Class "stolen" from stack overflow to handle Lithuanian encodings for the json library.
     """
     def default(self, obj):
         if isinstance(obj, np.integer):
@@ -37,8 +36,6 @@ class FormatVerifier:
         self.p_value = p_value
         self.missing_deviation = missing_value_deviation
         self.logger = logger
-        # TODO: There is a weird issue with encoding which can't encode lithuanian e with a dot. Seems to cause no
-        #  issues though.
 
         # Load config file.
         with open('config/config_verifier.json', 'r', encoding='utf-8') as f:
@@ -49,11 +46,12 @@ class FormatVerifier:
 
         try:
             # Load the data from GoogleBigQuery and store into a dict.
-            variable_names = list(pd.read_gbq("select * from data_info.variable_names", project_id='rent-avm')[
-                'VariableNames'].values)
-            value_names = list(pd.read_gbq("select * from data_info.value_names", project_id='rent-avm')['ValueNames'].values)
-            statistics = pd.read_gbq("select * from data_info.statistics", project_id='rent-avm').set_index(
-                'Name').T.to_dict()
+            variable_names = list(
+                pd.read_gbq("select * from data_info.variable_names", project_id='rent-avm')['VariableNames'].values)
+            value_names = list(
+                pd.read_gbq("select * from data_info.value_names", project_id='rent-avm')['ValueNames'].values)
+            statistics = \
+                pd.read_gbq("select * from data_info.statistics", project_id='rent-avm').set_index('Name').T.to_dict()
 
             self.historical_info = {
                 'names': {
@@ -62,6 +60,7 @@ class FormatVerifier:
                 },
                 'statistics': statistics
             }
+
         except GenericGBQException:
             self.historical_info = {
                 'names': {
@@ -190,14 +189,18 @@ class FormatVerifier:
         """
 
         # Get current batch statistics, add missing value percentage as well as number of samples.
-        # TODO: Error - sometimes select_dtypes object can make the df empty, thus crashing everything.
-        statistics = df.select_dtypes(exclude='object').describe().T
-        statistics = statistics[['mean', 'std', 'min', 'max']]
+        df_numeric = df.select_dtypes(exclude='object')
+        if df_numeric.empty:
+            statistics = pd.DataFrame()
+        else:
+            statistics = df_numeric.describe().T
+            statistics = statistics[['mean', 'std', 'min', 'max']]
+
         statistics['missing'] = df.isna().mean()
         statistics['samples'] = df.count()
         statistics['samples_total'] = df.shape[0]
         statistics['sum'] = df.sum()
-        statistics['sum_squares'] = (df.select_dtypes(exclude='object') ** 2).sum()
+        statistics['sum_squares'] = (df_numeric ** 2).sum()
 
         # Split variables into ones with historical statistical data and ones without.
         variables_existing = [name for name in statistics.index.values if
@@ -285,8 +288,8 @@ class FormatVerifier:
 
         if len(variables_failed_test) > 0:
             self.logger.warning(
-                'Found Variables that have failed the statistical test with p-value of {0}: {1}.'.format(self.p_value,
-                                                                                                         variables_failed_test))
+                'Found Variables that have failed the statistical test with p-value of {0}: {1}.'.format(
+                    self.p_value, variables_failed_test))
         else:
             self.logger.info(
                 'All variables passed the statistical tests succesfully with a p-value of {0}.'.format(self.p_value))
@@ -305,11 +308,9 @@ class FormatVerifier:
         gbq_value_names = pd.DataFrame(self.historical_info['names']['value_names'], columns=['ValueNames'])
         gbq_statistics = pd.DataFrame(self.historical_info['statistics']).T.reset_index().rename(columns={'index': 'Name'})
 
-        gbq_variable_names.to_gbq('data_info.variable_names', project_id='rent-avm', if_exists='replace',
-                                  progress_bar=False)
+        gbq_variable_names.to_gbq('data_info.variable_names', project_id='rent-avm', if_exists='replace', progress_bar=False)
         gbq_value_names.to_gbq('data_info.value_names', project_id='rent-avm', if_exists='replace', progress_bar=False)
         gbq_statistics.to_gbq('data_info.statistics', project_id='rent-avm', if_exists='replace', progress_bar=False)
-
 
         self.logger.info('Succesfully updated historical info and uploaded to GoogleBigQuery.')
         pass

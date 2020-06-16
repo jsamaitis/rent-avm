@@ -1,12 +1,14 @@
 flask
 google-cloud-logging
 google-cloud-bigquery
+google-api-python-client
 
 beautifulsoup4
 lxml
 selenium
 webdriver_manager
 fake_useragent
+
 pandas
 pandas_gbq
 scipy

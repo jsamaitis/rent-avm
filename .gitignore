@@ -3,5 +3,6 @@ __pycache__
 historical_dataset_info.json
 gcp_rent_avm
 gcp_rent_avm.pub
+gcp_auth_key.json
 *.csv
 *.log

@@ -8,30 +8,34 @@ import json
 
 
 # Setup Logging.
-# TODO: All logs appear as "default" instead of warning, info etc. Works when the scope is Global.
 client = google.cloud.logging.Client()
 client.get_default_handler()
 client.setup_logging()
 
 app = Flask(__name__)
 
-# TODO: CLEAN THIS SHIT UP.
+
 @app.route('/', methods=['POST', 'GET'])
-def start_vm():
+def start_vm(instance_name='scraper', instance_zone='europe-north1-a', project_id='rent-avm'):
     """
-    TODO: Descr.
+    Method used to start a VM instance on Google Cloud Platform with the given parameters.
+
+    Parameters
+    ----------
+    instance_name (str) : VM Instance name.
+    instance_zone (str) :  VM Instance zone.
+    project_id (str) : Id of the project.
+
     Returns
     -------
-
+    response (json) : Output of the execution of instances.start().
     """
-
     service = discovery.build('compute', 'v1')
-    request = service.instances().start(instance='scraper', zone='us-central1-a', project='rent-avm')
+    request = service.instances().start(instance=instance_name, zone=instance_zone, project=project_id)
     response = request.execute()
 
-    logging.info('Started the scraper VM.')
-    return json.dumps(response, indent=4)
-
+    logging.info('Started the "{}" VM.'.format(instance_name))
+    return json.dumps(response)
 
 
 if __name__ == '__main__':
