@@ -28,7 +28,7 @@ import tqdm
 
 
 class Scraper:
-    def __init__(self, logger, max_retries=3, verbose=True):
+    def __init__(self, logger, max_retries=10, verbose=True):
         """
         Class that scrapes the given website. Use the scraping method is Scraper().scrape.
 
@@ -45,7 +45,7 @@ class Scraper:
 
         # Load the config files.
         # TODO: Move this somewhere else in order to be able to edit without having to recreate the docker image each
-        #  time. Where?
+        #  time. Where?y
         with open("config/config_scraper.json") as f:
             self.config = json.load(f)
 
@@ -64,7 +64,9 @@ class Scraper:
         # TODO: Make this robust - currently it's very very bad.
         # YES YES, FREE PROXIES, WELL I DON'T HAVE $1000000000000 TO SPEND ON SOMETHING THAT I CAN GET FOR FREE.
         try:
-            return requests.get("http://pubproxy.com/api/proxy").json()['data'][0]['ipPort']  # 50 proxies per day.
+            return requests.get(
+                "http://pubproxy.com/api/proxy?type=http&country=DE,PL,LT,LV,ES&https=true&user_agent=true"
+            ).json()['data'][0]['ipPort']  # 50 proxies per day.
         except:
             return '82.135.148.201:8081'  # Random "working" proxy at a time. Hopefully the one above works! :)
 
@@ -149,7 +151,7 @@ class Scraper:
                 self.logger.warning(e)
                 retries += 1
 
-        error_message = 'Max retries exceeded while trying to get proxies.'
+        error_message = 'Max retries exceeded {} while trying to get proxies.'.format(self.max_retries)
         self.logger.error(error_message)
         raise TimeoutError(error_message)
 
@@ -246,7 +248,7 @@ class Scraper:
                 retries += 1
                 self.session = self.get_proxy_handler(handler_type='requests')
 
-        error_message = 'Max retries exceeded with url {}.'.format(url)
+        error_message = 'Max retries exceeded {0} with url {1}.'.format(self.max_retries, url)
         self.logger.error(error_message)
         raise TimeoutError(error_message)
 
@@ -290,7 +292,7 @@ class Scraper:
                 retries += 1
                 self.session = self.get_proxy_handler(handler_type='requests')
 
-        error_message = 'Max retries exceeded with url {}.'.format(url)
+        error_message = 'Max retries exceeded {0} with url {1}.'.format(self.max_retries, url)
         self.logger.error(error_message)
         raise TimeoutError(error_message)
 
@@ -371,7 +373,7 @@ class Scraper:
             # Raise TimeoutError if retries >= self.max_retries.
             retries += 1
             if retries >= self.max_retries:
-                error_message = 'Max retries exceeded with url {}.'.format(url)
+                error_message = 'Max retries exceeded {0} with url {1}.'.format(self.max_retries, url)
                 self.logger.error(error_message)
                 raise TimeoutError(error_message)
 
@@ -596,7 +598,7 @@ class Scraper:
 
         # Optional parameter to display a progress bar.
         if self.verbose:
-            loop = tqdm.tqdm(listing_urls[:20])  # TODO: TEMPORARY FOR TESTING.
+            loop = tqdm.tqdm(listing_urls[:20])
         else:
             loop = listing_urls
 
@@ -628,7 +630,7 @@ class Scraper:
                     # Raise TimeoutError if retries >= self.max_retries.
                     retries += 1
                     if retries >= self.max_retries:
-                        error_message = 'Max retries exceeded with url {}.'.format(listing_url)
+                        error_message = 'Max retries exceeded {0} with url {1}.'.format(self.max_retries, listing_url)
                         self.logger.error(error_message)
                         raise TimeoutError(error_message)
 

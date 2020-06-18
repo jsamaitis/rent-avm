@@ -1,6 +1,5 @@
 from scraper import Scraper
 from format_verifier import FormatVerifier
-from cleaner import Cleaner
 
 import datetime
 import json
@@ -27,11 +26,13 @@ def scrape():
 
     # Scrape and upload to Google Big Query.
     df = scraper.scrape()
+
+    # TODO: Replace with cleaner.
     table_name = 'data_listings.raw_listings_{}'.format(datetime.datetime.today().date().strftime('%Y_%m_%d'))
     df.to_gbq(table_name, project_id='rent-avm', if_exists='replace', progress_bar=False)
 
     verifier.verify(df)
-    return json.dumps({"Successfully scraped, uploaded and verified the data."})
+    return json.dumps({'message': "Successfully scraped, uploaded and verified the data."})
 
 
 def stop_vm(instance_name='scraper', instance_zone='europe-north1-a', project_id='rent-avm'):
