@@ -1,7 +1,7 @@
 from scraper import Scraper
 from format_verifier import FormatVerifier
+from uploader_cleaner import UploaderCleaner
 
-import datetime
 import json
 
 from googleapiclient import discovery
@@ -16,21 +16,16 @@ client.setup_logging()
 
 
 def scrape():
-    """
-    Runs scraper, format_verifier code on Google Cloud VM.
-    """
+    """Runs scraper, format_verifier, uploader_cleaner code on Google Cloud VM."""
 
     logging.info('Started the scraping process.')
     scraper = Scraper(logger=logging)
     verifier = FormatVerifier(logger=logging)
+    uploader_cleaner = UploaderCleaner(logger=logging)
 
-    # Scrape and upload to Google Big Query.
+    # Scrape, clean & upload, verify the data.
     df = scraper.scrape()
-
-    # TODO: Replace with cleaner.
-    table_name = 'data_listings.raw_listings_{}'.format(datetime.datetime.today().date().strftime('%Y_%m_%d'))
-    df.to_gbq(table_name, project_id='rent-avm', if_exists='replace', progress_bar=False)
-
+    uploader_cleaner.etl(df)
     verifier.verify(df)
     return json.dumps({'message': "Successfully scraped, uploaded and verified the data."})
 

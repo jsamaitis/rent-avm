@@ -473,7 +473,7 @@ class Scraper:
             object_data['Building Energy Class Category'] = None
 
         # Add DateScraped as a variable.
-        object_data['DateScraped'] = datetime.datetime.today().date().strftime('%Y_%m_%d')
+        object_data['Date Scraped'] = datetime.datetime.today().date().strftime('%Y-%m-%d')
 
         return object_data
 
@@ -598,7 +598,7 @@ class Scraper:
 
         # Optional parameter to display a progress bar.
         if self.verbose:
-            loop = tqdm.tqdm(listing_urls[:20])
+            loop = tqdm.tqdm(listing_urls)
         else:
             loop = listing_urls
 
